@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loopo.dev/schemas/steps/step-output.v3.json",
+  "title": "Loopo V3 Step Output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["step", "callback_schema", "commands"],
+  "properties": {
+    "schema_version": { "const": 3 },
+    "kind": { "const": "quest_step" },
+    "schema_id": {
+      "const": "https://loopo.dev/schemas/steps/step-output.v3.json"
+    },
+    "slug": { "type": "string" },
+    "quest_id": { "type": "string" },
+    "flow_id": { "type": "string" },
+    "flow_version": { "type": "integer" },
+    "step": {
+      "oneOf": [
+        { "type": "string" },
+        {
+          "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/compact_step"
+        }
+      ]
+    },
+    "state": { "type": "string" },
+    "summary": { "type": "string" },
+    "callback_schema": {
+      "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/embedded_schema"
+    },
+    "allowed_transitions": {
+      "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/transitions"
+    },
+    "context": {
+      "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/step_context"
+    },
+    "commands": {
+      "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/step_commands"
+    },
+    "docs": {
+      "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/docs"
+    },
+    "requirements": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

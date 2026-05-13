@@ -1,0 +1,55 @@
+{
+  "name": "@omar391/loopo",
+  "version": "0.1.0",
+  "description": "Deterministic V3 quest workflow CLI for Loopo launchers and runtime hooks.",
+  "module": "index.ts",
+  "type": "module",
+  "bin": {
+    "loopo": "./index.ts"
+  },
+  "exports": {
+    ".": "./index.ts",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "README.md",
+    "index.ts",
+    "agents",
+    "assets",
+    "references",
+    "schemas",
+    "scripts",
+    "tsconfig.json"
+  ],
+  "keywords": [
+    "loopo",
+    "cli",
+    "workflow",
+    "agent",
+    "bun"
+  ],
+  "license": "UNLICENSED",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22.6.0",
+    "bun": ">=1.1.0"
+  },
+  "scripts": {
+    "test": "bun test scripts/verify_flow_schema.test.ts scripts/verify_child_agent_integration.test.ts",
+    "verify": "bun run scripts/verify_coherency.ts && bun run scripts/verify_quest_contract.ts && bun run scripts/verify_runtime_hooks.ts && bun run scripts/verify_runtime_simulation.ts && bun run scripts/verify_runtime_stepper.ts",
+    "verify:live": "bun run scripts/verify_runtime_live.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^25.6.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "yaml": "^2.8.3"
+  }
+}

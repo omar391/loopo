@@ -1,0 +1,32 @@
+schema_version: 1
+id: executing
+handler: child_result
+input_step: child_result
+input_schema: child-result-input
+output_schema: child-dispatch-output
+summary: Start the ready child slug commands and submit child_result payloads as children finish.
+instructions: |-
+  # Loopo Executing Step
+
+  Prefer one ready child at a time. If the runtime can launch true subagents
+  and the ready tasks are clearly independent, parallel child execution is
+  allowed, but it is not the default.
+
+  Each dispatched task gets one child subagent, one child worktree, and no
+  hidden task split.
+
+  If the runtime cannot launch true subagents, drive the ready child commands
+  yourself in the current session. Run them one ready child at a time,
+  preserve the emitted child slug/worktree boundaries, and submit `child_result`
+  back to the parent only after each child reaches a terminal child state.
+
+  A successful `child_result` must include the merged child commit hash in
+  `merge_commit`. Do not report `status: passed` until the child work is merged
+  into the assigned `merge_target`.
+
+  Child worktree directories are transient execution scaffolds. Never satisfy a
+  merge by committing `worktrees/**` paths into the parent or landing branch;
+  land the actual deliverables in the current quest tree.
+
+  Prefer serial child execution over stalling. Parallelism is optional;
+  correctness of child boundaries and result submission is mandatory.

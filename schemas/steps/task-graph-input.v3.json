@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loopo.dev/schemas/steps/task-graph-input.v3.json",
+  "title": "Loopo V3 Task Graph Input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["step", "approved"],
+  "properties": {
+    "step": { "const": "task_graph" },
+    "approved": { "type": "boolean" },
+    "replan_reason": { "type": "string" }
+  },
+  "if": {
+    "properties": { "approved": { "const": false } },
+    "required": ["approved"]
+  },
+  "then": {
+    "required": ["replan_reason"]
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loopo.dev/schemas/steps/error-output.v3.json",
+  "title": "Loopo V3 Error Output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "schema_id", "error"],
+  "properties": {
+    "schema_version": { "const": 3 },
+    "kind": { "const": "error" },
+    "schema_id": {
+      "const": "https://loopo.dev/schemas/steps/error-output.v3.json"
+    },
+    "error": { "type": "string" },
+    "slug": { "type": "string" },
+    "state": { "type": "string" },
+    "schema": {
+      "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/schema_ref"
+    },
+    "expected_callback_schema": {
+      "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/embedded_schema"
+    },
+    "errors": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "command": { "type": "string" },
+    "replacement": {
+      "type": "array",
+      "items": {
+        "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/command"
+      }
+    }
+  }
+}

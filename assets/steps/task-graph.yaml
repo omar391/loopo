@@ -1,0 +1,32 @@
+schema_version: 1
+id: task_graph
+handler: task_graph
+input_step: task_graph
+input_schema: task-graph-input
+output_schema: step-output
+summary: Approve or reject the generated task graph, including a replan reason when rejected.
+instructions: |-
+  # Loopo Task Graph Step
+
+  Review the plan and task graph for completeness, independence, acceptance,
+  scope references, and missing system doc implications.
+
+  Approve only when dependencies, scope files, concurrency groups, and child
+  subagent assignment fields are deterministic.
+  Prefer a short serial chain for single-operator CLI execution. Multiple ready
+  tasks at the same stage need a concrete independence rationale, not just
+  "these could be parallel."
+
+  Reject graphs that are empty while the scoped request still requires
+  implementation work. Small scope should shrink the graph, not remove it.
+
+  Reject graphs that invent product scope or stack choices that were never
+  answered in the clarification round or recorded as explicit defaults.
+
+  Reject graphs that over-split tiny work. Setup-only tasks, trivial test-only
+  tasks, and micro-refactors should be folded into the nearest implementation
+  task unless they need separate ownership or materially different acceptance.
+
+  Reject small-prototype graphs that split scaffolding, implementation, and
+  verification into separate tasks when one or two concrete implementation
+  tasks would cover the same acceptance.

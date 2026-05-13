@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loopo.dev/schemas/steps/system-update-input.v3.json",
+  "title": "Loopo V3 System Update Input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["step", "system_update"],
+  "properties": {
+    "step": { "const": "system_update" },
+    "system_update": {
+      "$ref": "https://loopo.dev/schemas/system-update.v1.json"
+    }
+  }
+}

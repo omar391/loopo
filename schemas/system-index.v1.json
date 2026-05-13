@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loopo.dev/schemas/system-index.v1.json",
+  "title": "Loopo System Index v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "docs"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "docs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "type",
+          "path",
+          "schema_id",
+          "digest",
+          "status",
+          "updated_at"
+        ],
+        "properties": {
+          "id": { "type": "string" },
+          "type": {
+            "enum": [
+              "high-level-design",
+              "low-level-design",
+              "architecture",
+              "system-behaviours",
+              "design-system"
+            ]
+          },
+          "path": { "type": "string" },
+          "schema_id": { "type": "string" },
+          "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "status": { "type": "string" },
+          "updated_at": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,21 @@
+schema_version: 1
+id: landing
+handler: landing
+input_step: landing
+input_schema: landing-input
+output_schema: step-output
+summary: Submit landing status and final summary.
+instructions: |-
+  # Loopo Landing Step
+
+  Confirm child subagent merges, root validation, and system doc updates before
+  submitting the final landing status.
+
+  Do not submit `status: landed` unless every successful child task has a real
+  `merge_commit`, that commit is reflected in the coordinator quest branch, and
+  the merged deliverables are present there rather than only in a child
+  worktree.
+
+  Never land a commit that tracks files under `worktrees/`. If the current tree
+  still contains nested child worktree paths, the merge is wrong and must be
+  corrected before landing.

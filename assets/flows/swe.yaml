@@ -1,0 +1,73 @@
+schema_version: 1
+id: swe
+version: 1
+default_stage: planning
+stages:
+  - id: planning
+    step: plan
+    transitions:
+      questions: awaiting_user_answers
+      planned: plan_review
+  - id: awaiting_user_answers
+    step: questions
+    transitions:
+      answered: planning
+  - id: plan_review
+    step: task_graph
+    transitions:
+      approved: task_graph_ready
+      rejected: planning
+  - id: task_graph_ready
+    step: executing
+    transitions:
+      complete: validating
+      partial: task_graph_ready
+  - id: executing
+    step: executing
+    transitions:
+      complete: validating
+      partial: executing
+  - id: validating
+    step: validation
+    transitions:
+      passed: verification_pending
+      failed: task_graph_ready
+  - id: verification_pending
+    step: verification
+    transitions:
+      passed: system_update_pending
+      failed: validating
+  - id: system_update_pending
+    step: system_update
+    transitions:
+      updated: landing_ready
+  - id: landing_ready
+    step: landing
+    transitions:
+      landed: archived
+      blocked: landing_ready
+  - id: replanning
+    step: plan
+    transitions:
+      planned: plan_review
+  - id: archived
+    step: archived
+    transitions: {}
+subflows:
+  - id: replanning
+    type: in_flow_detour
+    starts_at: replanning
+    returns_to: plan_review
+    trigger: replan
+  - id: add_task
+    type: in_flow_detour
+    starts_at: replanning
+    returns_to: task_graph_ready
+    trigger: add_task
+  - id: child_task
+    type: spawned_quest
+    starts_at: task_graph_ready
+    returns_to: task_graph_ready
+    trigger: children[].commands.init
+    result_step: child_result
+    flow_id: swe

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loopo.dev/schemas/tasks.v3.json",
+  "title": "Loopo Tasks YAML Model v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "slug",
+    "quest_id",
+    "flow_id",
+    "flow_version",
+    "stage",
+    "prompt",
+    "context_root",
+    "coordinator_branch",
+    "coordinator_worktree",
+    "tasks"
+  ],
+  "properties": {
+    "schema_version": { "const": 3 },
+    "slug": { "type": "string" },
+    "quest_id": { "type": "string" },
+    "flow_id": { "type": "string" },
+    "flow_version": { "type": "integer" },
+    "stage": { "type": "string" },
+    "prompt": { "type": "string" },
+    "context_root": { "type": "string" },
+    "resolution_source": { "type": "string" },
+    "coordinator_branch": { "type": "string" },
+    "coordinator_worktree": { "type": "string" },
+    "assumptions": { "type": "array", "items": { "type": "string" } },
+    "constraints": { "type": "array", "items": { "type": "string" } },
+    "tasks": { "type": "array" }
+  }
+}

@@ -1,0 +1,396 @@
+#!/usr/bin/env bun
+
+import { existsSync, readdirSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parse as parseYaml } from "yaml";
+import { readText } from "./loopo_utils.ts";
+import { loadFlowDefinition } from "./loopo_flow.ts";
+import { validateSchemaId } from "./loopo_schema.ts";
+
+const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const WORKSPACE_ROOT = resolve(PACKAGE_ROOT, "..");
+const AI_RULES_ROOT = resolve(
+  process.env.AI_RULES_ROOT ?? join(WORKSPACE_ROOT, "ai-rules"),
+);
+const SKILL_ROOT = resolve(AI_RULES_ROOT, "skills", "loopo");
+const AGENT_MD_ROOT = resolve(AI_RULES_ROOT, "skills", "agent-md");
+
+function assertExists(path: string, label: string): void {
+  if (!existsSync(path)) throw new Error(`missing ${label}: ${path}`);
+}
+
+function assertContains(text: string, needle: string, scope: string): void {
+  if (!text.includes(needle))
+    throw new Error(`${scope} must include: ${needle}`);
+}
+
+function assertNotContains(text: string, needle: string, scope: string): void {
+  if (text.includes(needle))
+    throw new Error(`${scope} must not include: ${needle}`);
+}
+
+function assertMinimalSkillRoot(): void {
+  const visibleEntries = readdirSync(SKILL_ROOT).filter(
+    (entry) => !entry.startsWith("."),
+  );
+  if (visibleEntries.length !== 1 || visibleEntries[0] !== "SKILL.md") {
+    throw new Error(
+      `skills/loopo must stay launcher-only; found: ${visibleEntries.join(", ") || "(empty)"}`,
+    );
+  }
+}
+
+function stepTitle(id: string): string {
+  return id
+    .split(/[-_]/)
+    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function assertStepInstructionsSelfScoped(
+  flow: ReturnType<typeof loadFlowDefinition>,
+): void {
+  const forbiddenRawStateIds = flow.stages
+    .map((stage) => stage.id)
+    .filter((id) => id.includes("_"));
+  const forbiddenTransitionPhrases = [
+    "after canonical state is ready",
+    "advances to",
+    "returns to",
+    "send it back",
+    "sends failed",
+    "move to execution",
+    "before archiving",
+  ];
+
+  for (const step of Object.values(flow.steps_by_id)) {
+    const scope = `${step.id} step`;
+    const headings = step.instructions
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => /^#\s+Loopo\b/.test(line));
+    const expectedHeading = `# Loopo ${stepTitle(step.id)} Step`;
+    if (headings.length !== 1 || headings[0] !== expectedHeading) {
+      throw new Error(
+        `${scope} instructions must contain exactly one heading: ${expectedHeading}`,
+      );
+    }
+    const text = `${step.summary}\n${step.instructions}`;
+    assertNotContains(text, "Loopo Replanning Stage", scope);
+    assertNotContains(text, "Loopo Plan Review Stage", scope);
+    assertNotContains(text, "Loopo Task Graph Ready Stage", scope);
+    for (const stateId of forbiddenRawStateIds) {
+      assertNotContains(text, stateId, scope);
+    }
+    const normalized = text.toLowerCase();
+    for (const phrase of forbiddenTransitionPhrases) {
+      assertNotContains(normalized, phrase, scope);
+    }
+  }
+}
+
+function main(): number {
+  const required = [
+    ["loopo package.json", join(PACKAGE_ROOT, "package.json")],
+    ["skill launcher", join(SKILL_ROOT, "SKILL.md")],
+    ["swe flow", join(PACKAGE_ROOT, "assets", "flows", "swe.yaml")],
+    [
+      "base system behaviours",
+      join(PACKAGE_ROOT, "assets", "base-system-behaviours.yaml"),
+    ],
+    ["plan step", join(PACKAGE_ROOT, "assets", "steps", "plan.yaml")],
+    ["executing step", join(PACKAGE_ROOT, "assets", "steps", "executing.yaml")],
+    [
+      "controller contract",
+      join(PACKAGE_ROOT, "references", "core", "controller-contract.md"),
+    ],
+    [
+      "child integration test",
+      join(PACKAGE_ROOT, "scripts", "verify_child_agent_integration.test.ts"),
+    ],
+    [
+      "quest verifier",
+      join(PACKAGE_ROOT, "scripts", "verify_quest_contract.ts"),
+    ],
+    ["runtime simulator", join(PACKAGE_ROOT, "scripts", "loopo_sim.ts")],
+    [
+      "runtime simulation verifier",
+      join(PACKAGE_ROOT, "scripts", "verify_runtime_simulation.ts"),
+    ],
+    [
+      "system index schema",
+      join(PACKAGE_ROOT, "schemas", "system-index.v1.json"),
+    ],
+    [
+      "high-level schema",
+      join(PACKAGE_ROOT, "schemas", "system-high-level-design.v1.json"),
+    ],
+    [
+      "low-level schema",
+      join(PACKAGE_ROOT, "schemas", "system-low-level-design.v1.json"),
+    ],
+    [
+      "architecture schema",
+      join(PACKAGE_ROOT, "schemas", "system-architecture.v1.json"),
+    ],
+    [
+      "behaviours schema",
+      join(PACKAGE_ROOT, "schemas", "system-behaviours.v1.json"),
+    ],
+    [
+      "design-system schema",
+      join(PACKAGE_ROOT, "schemas", "system-design-system.v1.json"),
+    ],
+    [
+      "quest plan v3 schema",
+      join(PACKAGE_ROOT, "schemas", "quest-plan.v3.json"),
+    ],
+    ["tasks v3 schema", join(PACKAGE_ROOT, "schemas", "tasks.v3.json")],
+    [
+      "init output schema",
+      join(PACKAGE_ROOT, "schemas", "steps", "init-output.v3.json"),
+    ],
+    [
+      "step output schema",
+      join(PACKAGE_ROOT, "schemas", "steps", "step-output.v3.json"),
+    ],
+    [
+      "error output schema",
+      join(PACKAGE_ROOT, "schemas", "steps", "error-output.v3.json"),
+    ],
+    [
+      "common step schema defs",
+      join(PACKAGE_ROOT, "schemas", "steps", "common.v3.json"),
+    ],
+    ["flow YAML schema", join(PACKAGE_ROOT, "schemas", "flow.v1.json")],
+    [
+      "step definition YAML schema",
+      join(PACKAGE_ROOT, "schemas", "step-definition.v1.json"),
+    ],
+    [
+      "next input schema",
+      join(PACKAGE_ROOT, "schemas", "steps", "next-input.v3.json"),
+    ],
+    [
+      "plan schema",
+      join(PACKAGE_ROOT, "schemas", "steps", "plan-input.v3.json"),
+    ],
+    [
+      "child result schema",
+      join(PACKAGE_ROOT, "schemas", "steps", "child-result-input.v3.json"),
+    ],
+    [
+      "merge lease schema",
+      join(PACKAGE_ROOT, "schemas", "merge-lease.v1.json"),
+    ],
+    [
+      "system update schema",
+      join(PACKAGE_ROOT, "schemas", "system-update.v1.json"),
+    ],
+  ] as const;
+  for (const [label, path] of required) assertExists(path, label);
+  assertMinimalSkillRoot();
+  assertNotContains(
+    existsSync(join(PACKAGE_ROOT, "SKILL.md")) ? "present" : "",
+    "present",
+    "package skill launcher removed",
+  );
+
+  const baseBehavioursPath = join(
+    PACKAGE_ROOT,
+    "assets",
+    "base-system-behaviours.yaml",
+  );
+  const baseBehaviours = parseYaml(readText(baseBehavioursPath));
+  if (
+    !baseBehaviours ||
+    typeof baseBehaviours !== "object" ||
+    Array.isArray(baseBehaviours)
+  ) {
+    throw new Error("base system behaviours YAML must be an object");
+  }
+  const behaviourErrors = validateSchemaId(
+    baseBehaviours as Record<string, any>,
+    "https://loopo.dev/schemas/system-behaviours.v1.json",
+  );
+  if (behaviourErrors.length) {
+    throw new Error(
+      `base system behaviours schema validation failed: ${behaviourErrors.join(
+        "; ",
+      )}`,
+    );
+  }
+
+  const skill = readText(join(SKILL_ROOT, "SKILL.md"));
+  assertContains(
+    skill,
+    'loopo init "{request}" --cwd <cwd>',
+    "skills/loopo/SKILL.md",
+  );
+  assertContains(
+    skill,
+    "Package source lives in `/Volumes/Projects/business/AstronLab/omar391/loopo`.",
+    "skills/loopo/SKILL.md",
+  );
+  assertNotContains(skill, "loopo quest start --json", "skills/loopo/SKILL.md");
+  assertNotContains(
+    skill,
+    "loopo quest update --json",
+    "skills/loopo/SKILL.md",
+  );
+  assertNotContains(skill, "--stdin", "skills/loopo/SKILL.md");
+  assertNotContains(skill, "loopo apply", "skills/loopo/SKILL.md");
+  assertNotContains(skill, "loopo quest hook", "skills/loopo/SKILL.md");
+
+  const flow = loadFlowDefinition("swe");
+  assertStepInstructionsSelfScoped(flow);
+  if (flow.steps_by_id.executing.input_step !== "child_result") {
+    throw new Error("swe executing stage must accept child_result input");
+  }
+  if (!flow.steps_by_id.plan.instructions.includes("# Loopo Plan Step")) {
+    throw new Error("plan step must inline plan instructions");
+  }
+  assertNotContains(
+    flow.steps_by_id.plan.instructions,
+    "plan_intake",
+    "plan step",
+  );
+  assertContains(
+    flow.steps_by_id.plan.instructions,
+    "request_user_input",
+    "plan step",
+  );
+  assertContains(
+    flow.steps_by_id.plan.instructions,
+    "1-3 short questions",
+    "plan step",
+  );
+  assertContains(
+    flow.steps_by_id.plan.instructions,
+    "wait indefinitely for a human answer",
+    "plan step",
+  );
+  if ("spec_refs" in flow.steps_by_id.plan) {
+    throw new Error("step definitions must not point back to stage specs");
+  }
+  if (
+    !flow.subflows.some(
+      (subflow) =>
+        subflow.type === "spawned_quest" &&
+        subflow.result_step === "child_result" &&
+        subflow.returns_to === "task_graph_ready",
+    )
+  ) {
+    throw new Error("swe flow must define child subflow return contract");
+  }
+  assertNotContains(
+    existsSync(
+      join(PACKAGE_ROOT, "references", "profiles", "coding", "swe-profile.md"),
+    )
+      ? "present"
+      : "",
+    "present",
+    "unused profile removed",
+  );
+
+  const commonSpec = readText(
+    join(AGENT_MD_ROOT, "assets", "specs", "common.md"),
+  );
+  assertNotContains(commonSpec, "## Loopo Launcher", "common spec");
+  assertNotContains(commonSpec, "agent-md", "common spec");
+
+  assertNotContains(
+    existsSync(join(PACKAGE_ROOT, "assets", "specs")) ? "present" : "",
+    "present",
+    "loopo spec folder removed",
+  );
+
+  const repoAgents = readText(join(AI_RULES_ROOT, "AGENTS.md"));
+  assertNotContains(repoAgents, "## Loopo Launcher", "repo AGENTS.md");
+  assertNotContains(repoAgents, "rules:spec:loopo", "repo AGENTS.md");
+  assertNotContains(repoAgents, "skills/loopo/assets/specs", "repo AGENTS.md");
+  assertContains(
+    repoAgents,
+    "skills/agent-md/assets/specs/code-review.md",
+    "repo AGENTS.md",
+  );
+  assertContains(
+    repoAgents,
+    "skills/agent-md/assets/specs/ts.md",
+    "repo AGENTS.md",
+  );
+  assertNotContains(repoAgents, "loopo-stage-", "repo AGENTS.md");
+
+  const controller = readText(
+    join(PACKAGE_ROOT, "references", "core", "controller-contract.md"),
+  );
+  assertContains(controller, ".loopo/system.yaml", "controller contract");
+  assertContains(controller, "system_update_pending", "controller contract");
+  assertContains(
+    controller,
+    "Child subagents are senior developer agents",
+    "controller contract",
+  );
+  assertContains(controller, "merge_target", "controller contract");
+  assertContains(controller, "unauthorized/tampered", "controller contract");
+  assertContains(
+    controller,
+    "Do not add separate lifecycle stage specs",
+    "controller contract",
+  );
+  assertNotContains(controller, "compatibility-only", "controller contract");
+  assertNotContains(controller, "tasks.md", "controller contract");
+  assertNotContains(controller, "stage specs may exist", "controller contract");
+
+  for (const file of [
+    join("assets", "specs", "index.json"),
+    join("assets", "specs", "loopo-stage-executing.md"),
+    join("assets", "post-commit", "post-commit"),
+    join("scripts", "install_spec_post_commit_hook.sh"),
+    join("assets", "steps", "plan-intake.yaml"),
+    join("schemas", "steps", "plan-intake-input.v3.json"),
+    join("references", "core", "intake-protocol.md"),
+  ]) {
+    assertNotContains(
+      existsSync(join(PACKAGE_ROOT, file)) ? "present" : "",
+      "present",
+      `${file} removed`,
+    );
+  }
+
+  assertContains(
+    flow.steps_by_id.questions.instructions,
+    "human-provided answers",
+    "questions step",
+  );
+  assertContains(
+    flow.steps_by_id.questions.instructions,
+    "`questions` step schema",
+    "questions step",
+  );
+
+  for (const file of [
+    "apply-request.v1.json",
+    "apply-response.v1.json",
+    join("scripts", "verify_apply_abi.ts"),
+    join("scripts", "migrations", "migrate_task_loop_to_loopo.ts"),
+    join("scripts", "migrations", "migrate_legacy_task_docs.ts"),
+  ]) {
+    assertNotContains(
+      existsSync(join(PACKAGE_ROOT, file)) ? "present" : "",
+      "present",
+      `${file} removed`,
+    );
+  }
+
+  console.log("loopo coherency verification passed");
+  return 0;
+}
+
+try {
+  process.exit(main());
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}

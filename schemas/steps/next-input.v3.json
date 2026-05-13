@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loopo.dev/schemas/steps/next-input.v3.json",
+  "title": "Loopo V3 Quest Next Input",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["step", "action", "slug", "request"],
+      "properties": {
+        "step": { "const": "select_quest" },
+        "action": { "const": "create_quest" },
+        "slug": { "type": "string" },
+        "flow_id": { "type": "string" },
+        "request": { "type": "string" }
+      }
+    },
+    { "$ref": "https://loopo.dev/schemas/steps/plan-input.v3.json" },
+    { "$ref": "https://loopo.dev/schemas/steps/questions-input.v3.json" },
+    { "$ref": "https://loopo.dev/schemas/steps/task-graph-input.v3.json" },
+    { "$ref": "https://loopo.dev/schemas/steps/child-result-input.v3.json" },
+    { "$ref": "https://loopo.dev/schemas/steps/validation-input.v3.json" },
+    { "$ref": "https://loopo.dev/schemas/steps/verification-input.v3.json" },
+    { "$ref": "https://loopo.dev/schemas/steps/system-update-input.v3.json" },
+    { "$ref": "https://loopo.dev/schemas/steps/landing-input.v3.json" }
+  ]
+}

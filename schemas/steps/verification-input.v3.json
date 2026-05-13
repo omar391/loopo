@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loopo.dev/schemas/steps/verification-input.v3.json",
+  "title": "Loopo V3 Verification Input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["step", "status", "acceptance_trace", "risks"],
+  "properties": {
+    "step": { "const": "verification" },
+    "status": { "enum": ["passed", "failed"] },
+    "acceptance_trace": {
+      "type": "array",
+      "items": {
+        "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/acceptance_trace"
+      }
+    },
+    "risks": {
+      "type": "array",
+      "items": {
+        "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/risk"
+      }
+    }
+  }
+}

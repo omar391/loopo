@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loopo.dev/schemas/steps/lock-error.v3.json",
+  "title": "Loopo V3 Lock Error",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "schema_id", "slug", "lock"],
+  "properties": {
+    "schema_version": { "const": 3 },
+    "kind": { "const": "lock_error" },
+    "schema_id": {
+      "const": "https://loopo.dev/schemas/steps/lock-error.v3.json"
+    },
+    "slug": { "type": "string" },
+    "lock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "pid", "retry"],
+      "properties": {
+        "path": { "type": "string" },
+        "pid": {
+          "type": ["integer", "null"]
+        },
+        "retry": {
+          "oneOf": [
+            { "type": "string" },
+            {
+              "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/command"
+            }
+          ]
+        }
+      }
+    }
+  }
+}
