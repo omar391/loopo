@@ -12,7 +12,7 @@ instructions: |-
   scope references, and missing system doc implications.
 
   Approve only when dependencies, scope files, concurrency groups, and child
-  subagent assignment fields are deterministic.
+  CLI-agent assignment fields are deterministic.
   Prefer a short serial chain for single-operator CLI execution. Multiple ready
   tasks at the same stage need a concrete independence rationale, not just
   "these could be parallel."

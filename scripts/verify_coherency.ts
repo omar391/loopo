@@ -329,7 +329,7 @@ function main(): number {
   assertContains(controller, "system_update_pending", "controller contract");
   assertContains(
     controller,
-    "Child subagents are senior developer agents",
+    "Child CLI agents are senior developer agents",
     "controller contract",
   );
   assertContains(controller, "merge_target", "controller contract");

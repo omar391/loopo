@@ -8,7 +8,7 @@ summary: Submit system doc updates. Loopo writes signed repo docs.
 instructions: |-
   # Loopo System Update Step
 
-  Review child subagent summaries and return a `system_update` payload. The binary
+  Review child CLI-agent summaries and return a `system_update` payload. The binary
   validates and writes `.loopo/system.yaml` plus affected `.loopo/docs/*.yaml`.
 
   Treat merged child output in the coordinator quest branch as the source of
