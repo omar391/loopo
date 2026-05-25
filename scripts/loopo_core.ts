@@ -2201,13 +2201,13 @@ function renderLoopoShim(loopoScriptAbs: string): string {
     "    shift",
     "    ;;",
     "esac",
-    "if command -v bun >/dev/null 2>&1; then",
-    '  exec bun "$SCRIPT" "$@"',
-    "fi",
     "if command -v node >/dev/null 2>&1; then",
     "  if node -e \"const [major,minor]=process.versions.node.split('.').map(Number); process.exit(major > 22 || (major === 22 && minor >= 6) ? 0 : 1)\" >/dev/null 2>&1; then",
     '    exec node "$SCRIPT" "$@"',
     "  fi",
+    "fi",
+    "if command -v bun >/dev/null 2>&1; then",
+    '  exec bun "$SCRIPT" "$@"',
     "fi",
     "if command -v npx >/dev/null 2>&1; then",
     '  exec npx -y tsx "$SCRIPT" "$@"',
@@ -2225,10 +2225,13 @@ export function resolveCanonicalLoopoScriptPath(
   const worktreeMatch = normalized.match(
     /^(.*?)(?:[\\/])worktrees(?:[\\/])[^\\/]+(?:[\\/])(.*)$/,
   );
-  if (worktreeMatch) {
-    return resolve(worktreeMatch[1], worktreeMatch[2]);
+  const canonical = worktreeMatch
+    ? resolve(worktreeMatch[1], worktreeMatch[2])
+    : normalized;
+  if (canonical.match(/(?:^|[\\/])scripts[\\/]loopo\.ts$/)) {
+    return resolve(dirname(dirname(canonical)), "index.ts");
   }
-  return normalized;
+  return canonical;
 }
 
 export function resolveGlobalLoopoBinPath(): string {
