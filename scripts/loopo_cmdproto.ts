@@ -1,14 +1,9 @@
 #!/usr/bin/env bun
 
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import { runSimCli } from "./loopo_sim.ts";
-import { readStdinText } from "./loopo_utils.ts";
+import { expandHome, readStdinText, readText } from "./loopo_utils.ts";
 
-const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const ROOT_DIR = resolve(SCRIPT_DIR, "..");
-const SCHEMA_PATH = resolve(ROOT_DIR, "assets", "cmdproto", "schema.binpb");
-const MANIFEST_PATH = resolve(ROOT_DIR, "assets", "cmdproto", "runtime.binpb");
 const CMDPROTO_HELP_COMMANDS = [
   {
     path: "doctor",
@@ -35,19 +30,10 @@ const CMDPROTO_HELP_COMMANDS = [
     summary: "Run the existing simulation surface through the transparent cmdproto wrapper.",
   },
 ] as const;
-const CMDPROTO_HELP_EXECJSON = {
-  name: "cmdproto execjson",
+const CMDPROTO_HELP_EXECUTE = {
+  name: "cmdproto execute",
   summary: "Execute a machine JSON payload for a command path.",
-  usage: "cmdproto execjson <path> <json|@file|@->",
-} as const;
-
-const METHOD = {
-  doctor: "loopo.v1.LoopoService.Doctor",
-  hook: "loopo.v1.LoopoService.Hook",
-  init: "loopo.v1.LoopoService.Init",
-  questHelp: "loopo.v1.LoopoService.QuestHelp",
-  questNext: "loopo.v1.LoopoService.QuestNext",
-  sim: "loopo.v1.LoopoService.Sim",
+  usage: "cmdproto execute <path> --json <json|@file|@->",
 } as const;
 
 type CapturedCommand = {
@@ -55,10 +41,12 @@ type CapturedCommand = {
   stdout: string;
   stderr: string;
 };
-type CmdprotoModule = typeof import("cmdproto");
-type HandlerMap = import("cmdproto").HandlerMap;
 
-let cmdprotoModulePromise: Promise<CmdprotoModule> | null = null;
+type CommandExecution = {
+  statusCode: number;
+  stdout: string;
+  stderr: string;
+};
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -88,7 +76,7 @@ function isHelpOnlyArgv(argv: string[]): boolean {
 
 function cmdprotoHelpPayload(control: boolean): Record<string, unknown> {
   const payload: Record<string, unknown> = {
-    execjson: CMDPROTO_HELP_EXECJSON,
+    execute: CMDPROTO_HELP_EXECUTE,
   };
   if (!control) {
     payload.commands = [...CMDPROTO_HELP_COMMANDS];
@@ -100,7 +88,7 @@ function cmdprotoHelpText(): string {
   return [
     "Machine control:",
     "",
-    `  ${CMDPROTO_HELP_EXECJSON.usage} ${CMDPROTO_HELP_EXECJSON.summary}`,
+    `  ${CMDPROTO_HELP_EXECUTE.usage} ${CMDPROTO_HELP_EXECUTE.summary}`,
     "",
   ].join("\n");
 }
@@ -112,38 +100,6 @@ function writeCmdprotoHelp(argv: string[], control: boolean): number {
     process.stdout.write(cmdprotoHelpText());
   }
   return 0;
-}
-
-function isCmdprotoMissingPackage(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error ?? "");
-  return (
-    message.includes("Cannot find package 'cmdproto'") ||
-    message.includes('Cannot find module "cmdproto"') ||
-    message.includes("Cannot find module 'cmdproto'")
-  );
-}
-
-async function loadCmdprotoModule(): Promise<CmdprotoModule> {
-  if (!cmdprotoModulePromise) {
-    cmdprotoModulePromise = import("cmdproto").catch((error) => {
-      cmdprotoModulePromise = null;
-      if (isCmdprotoMissingPackage(error)) {
-        throw new Error(
-          `cmdproto runtime is unavailable. Run \`bun install\` in ${ROOT_DIR} to install the sidecar dependency.`,
-        );
-      }
-      throw error;
-    });
-  }
-  return await cmdprotoModulePromise;
-}
-
-async function toCommandOutcome(
-  result: Record<string, unknown>,
-  statusCode: number,
-) {
-  const { commandOutcome } = await loadCmdprotoModule();
-  return commandOutcome(result, { statusCode });
 }
 
 function pushFlag(args: string[], flag: string, value: unknown): void {
@@ -234,6 +190,19 @@ function parseJsonOutput(
   }
 }
 
+function normalizeJsonStdout(
+  output: CapturedCommand,
+  fallbackLabel: string,
+): string {
+  parseJsonOutput(output, fallbackLabel);
+  const trimmed = output.stdout.trim();
+  return trimmed ? `${trimmed}\n` : "{}\n";
+}
+
+function renderJsonStdout(payload: Record<string, unknown>): string {
+  return `${JSON.stringify(payload, null, 2)}\n`;
+}
+
 function parseInstallerOutput(output: CapturedCommand): Record<string, unknown> {
   const lines = output.stdout
     .split(/\r?\n/)
@@ -273,7 +242,42 @@ function parseDoctorOutput(output: CapturedCommand): Record<string, unknown> {
   };
 }
 
-async function invokeInit(params: Record<string, unknown>) {
+function readJsonSource(raw: string): Record<string, unknown> {
+  let text = raw;
+  if (raw === "@-") {
+    text = readStdinText();
+  } else if (raw.startsWith("@")) {
+    text = readText(resolve(expandHome(raw.slice(1))));
+  }
+  if (!text.trim()) {
+    return {};
+  }
+  const parsed = JSON.parse(text);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("cmdproto execute requires a JSON object payload");
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function parseExecuteInvocation(argv: string[]): {
+  pathTokens: string[];
+  payload: Record<string, unknown>;
+} {
+  if (argv[0] !== "execute") {
+    throw new Error(`Unknown cmdproto command: ${argv.join(" ")}`);
+  }
+  const executeArgv = argv.slice(1);
+  const jsonIndex = executeArgv.indexOf("--json");
+  if (jsonIndex < 1 || jsonIndex !== executeArgv.length - 2) {
+    throw new Error(`Usage: ${CMDPROTO_HELP_EXECUTE.usage}`);
+  }
+  return {
+    pathTokens: executeArgv.slice(0, jsonIndex),
+    payload: readJsonSource(executeArgv[jsonIndex + 1]),
+  };
+}
+
+async function invokeInit(params: Record<string, unknown>): Promise<CommandExecution> {
   const { runInit } = await loadLoopoCommands();
   const args: string[] = [];
   const request = stringValue(params.request);
@@ -285,26 +289,31 @@ async function invokeInit(params: Record<string, unknown>) {
   pushFlag(args, "--flow", params.flow);
   pushFlag(args, "--slug", params.slug);
   const output = withCapturedOutput(() => runInit(args));
-  const result = output.stdout.trim().startsWith("{")
-    ? parseJsonOutput(output, "loopo init")
-    : parseInstallerOutput(output);
-  return await toCommandOutcome(result, output.statusCode);
+  const stdout = output.stdout.trim().startsWith("{")
+    ? normalizeJsonStdout(output, "loopo init")
+    : renderJsonStdout(parseInstallerOutput(output));
+  return { statusCode: output.statusCode, stdout, stderr: output.stderr };
 }
 
-async function invokeQuestNext(params: Record<string, unknown>) {
+async function invokeQuestNext(
+  params: Record<string, unknown>,
+): Promise<CommandExecution> {
   const { runQuestNextV3 } = await loadLoopoCommands();
   const args: string[] = [];
   pushFlag(args, "--slug", params.slug);
   pushFlag(args, "--cwd", params.cwd);
   pushJsonArg(args, params.payload);
   const output = withCapturedOutput(() => runQuestNextV3(args));
-  return await toCommandOutcome(
-    parseJsonOutput(output, "loopo quest next"),
-    output.statusCode,
-  );
+  return {
+    statusCode: output.statusCode,
+    stdout: normalizeJsonStdout(output, "loopo quest next"),
+    stderr: output.stderr,
+  };
 }
 
-async function invokeQuestHelp(params: Record<string, unknown>) {
+async function invokeQuestHelp(
+  params: Record<string, unknown>,
+): Promise<CommandExecution> {
   const { runQuestHelpV3 } = await loadLoopoCommands();
   const args: string[] = [];
   const query = stringValue(params.query);
@@ -312,13 +321,14 @@ async function invokeQuestHelp(params: Record<string, unknown>) {
     args.push(query);
   }
   const output = withCapturedOutput(() => runQuestHelpV3(args));
-  return await toCommandOutcome(
-    parseJsonOutput(output, "loopo quest help"),
-    output.statusCode,
-  );
+  return {
+    statusCode: output.statusCode,
+    stdout: normalizeJsonStdout(output, "loopo quest help"),
+    stderr: output.stderr,
+  };
 }
 
-async function invokeHook(params: Record<string, unknown>) {
+async function invokeHook(params: Record<string, unknown>): Promise<CommandExecution> {
   const { runHook } = await loadLoopoCommands();
   const args: string[] = [];
   pushFlag(args, "--runtime", params.runtime);
@@ -327,13 +337,14 @@ async function invokeHook(params: Record<string, unknown>) {
   pushFlag(args, "--slug", params.slug);
   pushJsonArg(args, params.payload);
   const output = withCapturedOutput(() => runHook(args));
-  return await toCommandOutcome(
-    parseJsonOutput(output, "loopo hook"),
-    output.statusCode,
-  );
+  return {
+    statusCode: output.statusCode,
+    stdout: normalizeJsonStdout(output, "loopo hook"),
+    stderr: output.stderr,
+  };
 }
 
-async function invokeDoctor(params: Record<string, unknown>) {
+async function invokeDoctor(params: Record<string, unknown>): Promise<CommandExecution> {
   const { runDoctor } = await loadLoopoCommands();
   const args: string[] = [];
   pushFlag(args, "--repo", params.repo);
@@ -342,10 +353,14 @@ async function invokeDoctor(params: Record<string, unknown>) {
     args.push("--fix");
   }
   const output = withCapturedOutput(() => runDoctor(args));
-  return await toCommandOutcome(parseDoctorOutput(output), output.statusCode);
+  return {
+    statusCode: output.statusCode,
+    stdout: renderJsonStdout(parseDoctorOutput(output)),
+    stderr: output.stderr,
+  };
 }
 
-async function invokeSim(params: Record<string, unknown>) {
+async function invokeSim(params: Record<string, unknown>): Promise<CommandExecution> {
   const args: string[] = [];
   const mode = stringValue(params.mode);
   if (mode) {
@@ -357,33 +372,23 @@ async function invokeSim(params: Record<string, unknown>) {
   pushFlag(args, "--flow", params.flow);
   pushJsonArg(args, params.payload);
   const output = withCapturedOutput(() => runSimCli(args));
-  return await toCommandOutcome(parseJsonOutput(output, "loopo sim"), output.statusCode);
+  return {
+    statusCode: output.statusCode,
+    stdout: normalizeJsonStdout(output, "loopo sim"),
+    stderr: output.stderr,
+  };
 }
 
-export const handlers: HandlerMap = {
-  [METHOD.init](params) {
-    return invokeInit(objectValue(params));
-  },
-  [METHOD.questNext](params) {
-    return invokeQuestNext(objectValue(params));
-  },
-  [METHOD.questHelp](params) {
-    return invokeQuestHelp(objectValue(params));
-  },
-  [METHOD.hook](params) {
-    return invokeHook(objectValue(params));
-  },
-  [METHOD.doctor](params) {
-    return invokeDoctor(objectValue(params));
-  },
-  [METHOD.sim](params) {
-    return invokeSim(objectValue(params));
-  },
-};
-
-async function createLoopoCmdprotoRuntime() {
-  const { createRuntimeFromFile } = await loadCmdprotoModule();
-  return createRuntimeFromFile(handlers, SCHEMA_PATH, MANIFEST_PATH);
+async function runExecuteCommand(argv: string[]): Promise<CommandExecution> {
+  const { pathTokens, payload } = parseExecuteInvocation(argv);
+  const path = pathTokens.join(" ");
+  if (path === "init") return await invokeInit(payload);
+  if (path === "doctor") return await invokeDoctor(payload);
+  if (path === "hook") return await invokeHook(payload);
+  if (path === "quest help") return await invokeQuestHelp(payload);
+  if (path === "quest next") return await invokeQuestNext(payload);
+  if (path === "sim") return await invokeSim(payload);
+  throw new Error(`Unknown command: ${path}`);
 }
 
 export async function runLoopoCmdproto(
@@ -394,12 +399,11 @@ export async function runLoopoCmdproto(
   if (isHelpOnlyArgv(argv)) {
     return writeCmdprotoHelp(argv, control);
   }
-  const runtime = await createLoopoCmdprotoRuntime();
-  const { runCli } = await loadCmdprotoModule();
-  const stdin = process.stdin.isTTY ? "" : readStdinText();
-  const effectiveArgv = control ? ["cmdproto", ...argv] : argv;
-  const result = await runCli(runtime, effectiveArgv, stdin);
-  process.stdout.write(result.stdout);
-  process.stderr.write(result.stderr);
+  if (!control) {
+    throw new Error("cmdproto control commands must be invoked as `loopo cmdproto ...`");
+  }
+  const result = await runExecuteCommand(argv);
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
   return result.statusCode;
 }

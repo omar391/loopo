@@ -12,7 +12,7 @@ node index.ts sim start --request "build me a python app" --runtime codex
 node index.ts sim next --repo /tmp/loopo-sim/repo
 node index.ts sim status --repo /tmp/loopo-sim/repo
 node index.ts doctor --fix
-node index.ts cmdproto execjson init '{"request":"loopo:build-the-app","cwd":"/repo","runtime":"codex"}'
+node index.ts cmdproto execute init --json '{"request":"loopo:build-the-app","cwd":"/repo","runtime":"codex"}'
 ```
 
 The launcher skill lives in
@@ -23,7 +23,7 @@ YAML, and `schemas/steps`. Flow and step-definition YAML are schema-backed by
 `schemas/flow.v1.json` and `schemas/step-definition.v1.json`.
 
 `cmdproto` is wired in as a transparent command wrapper. `loopo cmdproto`
-mirrors the current public command paths through `cmdproto execjson <path>`,
+mirrors the current public command paths through `cmdproto execute <path> --json <payload>`,
 while still delegating to the existing `loopo init`, `loopo quest next`,
 `loopo quest help`, `loopo hook`, `loopo doctor`, and `loopo sim` command
 logic. The V3 lifecycle state machine and JSON Schema payload contracts remain

@@ -119,7 +119,7 @@ Usage:
   loopo sim <start|next|status|hook|callback> [--repo <path>] [--runtime <codex|gemini|copilot>] [--request <text>] [--flow <id>] [--json <json|@file|@->]
   loopo doctor [--repo <path>] [--runtime <codex|gemini|copilot|all>] [--fix]
   loopo cmdproto --help [--json]
-  loopo cmdproto execjson <path> <json|@file|@->
+  loopo cmdproto execute <path> --json <json|@file|@->
 `);
 }
 
