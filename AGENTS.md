@@ -1,0 +1,86 @@
+<!-- markdownlint-disable MD025 -->
+<!-- BEGIN rules:spec:common -->
+
+# Shared Rules
+
+- **Worktree isolation:** never edit, stage, or commit directly on `main`; use a dedicated task worktree first.
+- Put all code changes in `<repo>/worktrees/<name>/` and switch before editing.
+- Keep the repo-owned `/worktrees/*` path gitignored.
+- Follow any runtime skill's worktree naming, branch naming, or reconcile flow.
+- One worktree = one coherent task.
+- Remove temporary worktrees and branches after landing.
+- Use per-worktree tool envs (`bin/`, `.venv/`, `.codex-rotate/bin/`).
+- Symlink any new or existing `temp`, `tmp`, `_temp`, `_tmp`, `.tmp`, or `.temp` folders to an OS-reclaimable temp location instead of keeping real directories in the repo.
+- Run relevant tests/builds/checks before landing.
+- **Token discipline:** no user-facing prose unless needed to complete the requested action. Avoid mid-task updates unless blocked or coordination-critical. Act from context; ask only when needed. End with compact `what changed / how / checks` when applicable. Omit logs, diffs, and repeated context unless requested.
+
+<!-- END rules:spec:common -->
+<!-- BEGIN rules:spec:task-ledger -->
+
+# Task Ledger
+
+- If the repo uses a root `tasks.md`, treat it as the canonical execution ledger for the current worktree.
+- For a new worktree, replace `tasks.md` with a concise ordered task list derived from the latest user request before editing.
+- For a continuation, update the same `tasks.md` in place so it reflects the remaining work accurately.
+- Do not land until every item in `tasks.md` is complete and the relevant checks are green.
+
+<!-- END rules:spec:task-ledger -->
+<!-- BEGIN rules:spec:coding -->
+
+# Coding Baseline
+
+- **Minimal diff**: aim for the smallest code change that satisfies the goal; avoid unnecessary refactors, reformats, or scope creep in the same changeset.
+- Keep edits scoped and follow repo idioms.
+- Prefer TDD/BDD: write or update tests before (or alongside) the implementation for behavior changes. Apply SOLID only when it reduces churn.
+- **Integration tests must use isolated live environments** (sandboxed databases, test accounts, ephemeral services). Never run integration tests against a production runtime or data store.
+- Optimize for agentic locality: prefer cohesive production files ~300-500 lines; treat 500+ as a smell and 1,000+ as a split candidate in multi-file modules unless generated, declarative, or inherently cohesive.
+- Split by semantic boundary, for example types, I/O, validation, domain logic, UI state/view, CLI parsing/execution, test helpers, or test scenarios.
+- Avoid splits where the pieces must always be read or changed together.
+
+<!-- END rules:spec:coding -->
+<!-- BEGIN rules:spec:ts -->
+
+# TypeScript Rules
+
+- Use explicit boundary types; avoid new `any` without a repo exception.
+- Keep external-input/config validators and TS types aligned; update adjacent type/compile checks for public API changes.
+
+<!-- END rules:spec:ts -->
+<!-- BEGIN rules:local -->
+
+# Loopo Agent Guide
+
+## Working Rules
+
+- This repo is `@omar391/loopo`, a deterministic V3 workflow launcher for slug-based quest flows.
+- Prefer `bun` for local execution and tests. The main verification commands are the scripts listed in `package.json`.
+- Do not edit `.loopo/**` state files directly unless you are intentionally repairing canonical runtime state.
+- For `loopo:` requests, use `loopo init "{request}" --cwd <cwd> --runtime <runtime>` and follow compact JSON step output.
+- Use `loopo init`, `loopo quest next`, `loopo hook`, `loopo sim`, and `loopo doctor --fix` to exercise lifecycle behavior instead of hand-editing runtime outputs.
+- Keep changes aligned with the schema-backed workflow files in `schemas/**`, `assets/**`, and `scripts/**`.
+- When changing lifecycle logic, update or run the relevant verification scripts before finishing.
+- Treat `tasks.md` as the repo's lifecycle coverage ledger, not as a transient task checklist, unless the user explicitly asks to repurpose it.
+- Treat `.loopo/quests/*/tasks.yaml`, quest JSONL files, emitted child commands, and git worktree state as canonical evidence when prose and state disagree.
+- Keep parent/root sessions coordinator-only during child execution; child CLI agents own implementation work in dedicated worktrees.
+- Keep edits ASCII unless a file already uses non-ASCII characters.
+- Avoid destructive git commands and do not revert unrelated user changes.
+
+## Helpful References
+
+- `README.md` for the user-facing CLI surface.
+- `tasks.md` for current lifecycle coverage notes.
+- `references/core/architecture.md` for controller, lifecycle, runtime hook, ops, and supervisor contracts.
+- `references/core/analytical-framework.md` for rigorous reasoning checks.
+- `references/core/optimization-framework.md` for deterministic execution discipline.
+- `agents/openai.yaml` for the Codex default invocation contract.
+
+## Verification
+
+- Run `bun run scripts/verify_coherency.ts` after documentation, lifecycle, schema, or reference changes.
+- Run `bun run scripts/verify_quest_contract.ts` after quest state, schema, or command-surface changes.
+- Run `bun run scripts/verify_runtime_hooks.ts` after hook, continuation, drift, or doctor changes.
+- Run `bun run verify` before finishing broad lifecycle or architecture changes.
+
+<!-- END rules:local -->
+
+Load on-demand specs: [`code-review`](~/.agents/skills/agent-md/assets/specs/code-review.md)

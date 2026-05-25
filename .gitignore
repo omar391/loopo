@@ -32,3 +32,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# git-land trunk
+.trunk/*
+!.trunk/trunk.yaml
+!.trunk/configs/
+!.trunk/configs/**
