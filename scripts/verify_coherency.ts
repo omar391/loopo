@@ -364,7 +364,7 @@ function main(): number {
   );
   assertContains(
     architecture,
-    "loopo cmdproto execute <path> --json <payload>",
+    "loopo cmdproto execjson <path> <payload>",
     "architecture reference",
   );
   assertContains(

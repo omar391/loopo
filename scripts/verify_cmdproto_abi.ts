@@ -109,8 +109,8 @@ function main(): number {
       `cmdproto help must expose ${expectedPaths.join(", ")}; got ${commandPaths.join(", ")}`,
     );
   }
-  if (helpJson.execute?.usage !== "cmdproto execute <path> --json <json|@file|@->") {
-    fail(`unexpected root execute usage: ${JSON.stringify(helpJson.execute)}`);
+  if (helpJson.execjson?.usage !== "cmdproto execjson <path> <json|@file|@->") {
+    fail(`unexpected root execjson usage: ${JSON.stringify(helpJson.execjson)}`);
   }
 
   const controlHelp = runLoopo(
@@ -121,8 +121,8 @@ function main(): number {
   );
   if (controlHelp.status !== 0) fail(controlHelp.stderr || controlHelp.stdout);
   const controlHelpJson = parseJson(controlHelp.stdout);
-  if (controlHelpJson.execute?.usage !== "cmdproto execute <path> --json <json|@file|@->") {
-    fail(`unexpected cmdproto control help: ${JSON.stringify(controlHelpJson.execute)}`);
+  if (controlHelpJson.execjson?.usage !== "cmdproto execjson <path> <json|@file|@->") {
+    fail(`unexpected cmdproto control help: ${JSON.stringify(controlHelpJson.execjson)}`);
   }
   const controlHelpText = runLoopo(
     process.cwd(),
@@ -131,7 +131,7 @@ function main(): number {
     process.env as Record<string, string>,
   );
   if (controlHelpText.status !== 0) fail(controlHelpText.stderr || controlHelpText.stdout);
-  if (!controlHelpText.stdout.includes("cmdproto execute <path> --json <json|@file|@->")) {
+  if (!controlHelpText.stdout.includes("cmdproto execjson <path> <json|@file|@->")) {
     fail(`unexpected cmdproto text help: ${JSON.stringify(controlHelpText.stdout)}`);
   }
 
@@ -162,7 +162,7 @@ function main(): number {
 
     const abiHelp = runLoopo(
       fixture.repo,
-      ["cmdproto", "execute", "quest", "help", "--json", "{}"],
+      ["cmdproto", "execjson", "quest", "help", "{}"],
       undefined,
       fixture.env,
     );
@@ -176,9 +176,8 @@ function main(): number {
       fixture.repo,
       [
         "cmdproto",
-        "execute",
+        "execjson",
         "init",
-        "--json",
         JSON.stringify({
           request: "loopo: build the app",
           cwd: fixture.repo,
@@ -206,10 +205,9 @@ function main(): number {
       fixture.repo,
       [
         "cmdproto",
-        "execute",
+        "execjson",
         "quest",
         "next",
-        "--json",
         JSON.stringify({
           slug,
           cwd: fixture.repo,

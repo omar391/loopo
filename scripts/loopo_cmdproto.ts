@@ -30,10 +30,10 @@ const CMDPROTO_HELP_COMMANDS = [
     summary: "Run the existing simulation surface through the transparent cmdproto wrapper.",
   },
 ] as const;
-const CMDPROTO_HELP_EXECUTE = {
-  name: "cmdproto execute",
+const CMDPROTO_HELP_EXECJSON = {
+  name: "cmdproto execjson",
   summary: "Execute a machine JSON payload for a command path.",
-  usage: "cmdproto execute <path> --json <json|@file|@->",
+  usage: "cmdproto execjson <path> <json|@file|@->",
 } as const;
 
 type CapturedCommand = {
@@ -76,7 +76,7 @@ function isHelpOnlyArgv(argv: string[]): boolean {
 
 function cmdprotoHelpPayload(control: boolean): Record<string, unknown> {
   const payload: Record<string, unknown> = {
-    execute: CMDPROTO_HELP_EXECUTE,
+    execjson: CMDPROTO_HELP_EXECJSON,
   };
   if (!control) {
     payload.commands = [...CMDPROTO_HELP_COMMANDS];
@@ -86,9 +86,9 @@ function cmdprotoHelpPayload(control: boolean): Record<string, unknown> {
 
 function cmdprotoHelpText(): string {
   return [
-    "Machine control:",
+    "Machine execjson:",
     "",
-    `  ${CMDPROTO_HELP_EXECUTE.usage} ${CMDPROTO_HELP_EXECUTE.summary}`,
+    `  ${CMDPROTO_HELP_EXECJSON.usage} ${CMDPROTO_HELP_EXECJSON.summary}`,
     "",
   ].join("\n");
 }
@@ -254,26 +254,25 @@ function readJsonSource(raw: string): Record<string, unknown> {
   }
   const parsed = JSON.parse(text);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("cmdproto execute requires a JSON object payload");
+    throw new Error("cmdproto execjson requires a JSON object payload");
   }
   return parsed as Record<string, unknown>;
 }
 
-function parseExecuteInvocation(argv: string[]): {
+function parseExecJsonInvocation(argv: string[]): {
   pathTokens: string[];
   payload: Record<string, unknown>;
 } {
-  if (argv[0] !== "execute") {
+  if (argv[0] !== "execjson") {
     throw new Error(`Unknown cmdproto command: ${argv.join(" ")}`);
   }
-  const executeArgv = argv.slice(1);
-  const jsonIndex = executeArgv.indexOf("--json");
-  if (jsonIndex < 1 || jsonIndex !== executeArgv.length - 2) {
-    throw new Error(`Usage: ${CMDPROTO_HELP_EXECUTE.usage}`);
+  const execjsonArgv = argv.slice(1);
+  if (execjsonArgv.length < 2) {
+    throw new Error(`Usage: ${CMDPROTO_HELP_EXECJSON.usage}`);
   }
   return {
-    pathTokens: executeArgv.slice(0, jsonIndex),
-    payload: readJsonSource(executeArgv[jsonIndex + 1]),
+    pathTokens: execjsonArgv.slice(0, -1),
+    payload: readJsonSource(execjsonArgv[execjsonArgv.length - 1]),
   };
 }
 
@@ -379,8 +378,8 @@ async function invokeSim(params: Record<string, unknown>): Promise<CommandExecut
   };
 }
 
-async function runExecuteCommand(argv: string[]): Promise<CommandExecution> {
-  const { pathTokens, payload } = parseExecuteInvocation(argv);
+async function runExecJsonCommand(argv: string[]): Promise<CommandExecution> {
+  const { pathTokens, payload } = parseExecJsonInvocation(argv);
   const path = pathTokens.join(" ");
   if (path === "init") return await invokeInit(payload);
   if (path === "doctor") return await invokeDoctor(payload);
@@ -402,7 +401,7 @@ export async function runLoopoCmdproto(
   if (!control) {
     throw new Error("cmdproto control commands must be invoked as `loopo cmdproto ...`");
   }
-  const result = await runExecuteCommand(argv);
+  const result = await runExecJsonCommand(argv);
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
   return result.statusCode;

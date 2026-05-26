@@ -23,7 +23,7 @@ service LoopoService {
       path: "quest next"
       summary: "Advance one quest lifecycle step through the existing quest-next command."
       example: {
-        command: "quest next --json {\"slug\":\"build-the-app\",\"cwd\":\"/repo\",\"payload\":{\"step\":\"select_quest\",\"action\":\"create_quest\",\"slug\":\"build-the-app\",\"flow_id\":\"swe\",\"request\":\"loopo:build-the-app\"}}"
+        command: "quest next --slug build-the-app --cwd /repo --json {\"step\":\"select_quest\",\"action\":\"create_quest\",\"slug\":\"build-the-app\",\"flow_id\":\"swe\",\"request\":\"loopo:build-the-app\"}"
         description: "Create a quest by forwarding a structured next payload through the direct JSON shortcut."
         request_json: "{\"slug\":\"build-the-app\",\"cwd\":\"/repo\",\"payload\":{\"step\":\"select_quest\",\"action\":\"create_quest\",\"slug\":\"build-the-app\",\"flow_id\":\"swe\",\"request\":\"loopo:build-the-app\"}}"
       }
@@ -47,7 +47,7 @@ service LoopoService {
       path: "hook"
       summary: "Invoke the existing hook command with a structured JSON payload."
       example: {
-        command: "hook --json {\"runtime\":\"codex\",\"payload\":{\"event\":\"Stop\",\"stop_reason\":\"none\"}}"
+        command: "hook --runtime codex --json {\"event\":\"Stop\",\"stop_reason\":\"none\"}"
         description: "Send a hook payload through the direct JSON shortcut."
         request_json: "{\"runtime\":\"codex\",\"payload\":{\"event\":\"Stop\",\"stop_reason\":\"none\"}}"
       }
@@ -133,6 +133,7 @@ message QuestNextRequest {
 
   google.protobuf.Struct payload = 3 [
     (cmdproto.v1.param) = {
+      json: { enabled: true }
       help: "Quest callback payload matching the current callback_schema."
     },
     (cmdproto.v1.field_json_schema) = {
@@ -162,6 +163,7 @@ message HookRequest {
 
   google.protobuf.Struct payload = 3 [
     (cmdproto.v1.param) = {
+      json: { enabled: true }
       help: "Hook payload object forwarded to loopo hook."
     },
     (cmdproto.v1.field_json_schema) = {
@@ -231,6 +233,7 @@ message SimRequest {
 
   google.protobuf.Struct payload = 6 [
     (cmdproto.v1.param) = {
+      json: { enabled: true }
       help: "Optional simulation payload for hook or callback modes."
     },
     (cmdproto.v1.field_json_schema) = {

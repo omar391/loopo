@@ -24,7 +24,7 @@ loopo init "{request}" --cwd <cwd> --runtime <runtime>
 - `loopo doctor --fix` repairs system scaffolding, hook installation, shims,
   manifests, and managed drift.
 - `loopo sim` provides deterministic lifecycle stepping for local simulation.
-- `loopo cmdproto execute <path> --json <payload>` mirrors the current public CLI as
+- `loopo cmdproto execjson <path> <payload>` mirrors the current public CLI as
   a machine wrapper and introspection surface; it delegates back to the direct
   Loopo command logic and does not replace the V3 quest lifecycle.
 - Agents must never edit `.loopo/**` directly. Root and child state changes must
