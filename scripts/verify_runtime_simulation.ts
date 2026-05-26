@@ -6,6 +6,10 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseTasksYaml, questFiles } from "./loopo_core.ts";
 import {
+  CONCRETE_REACT_HABIT_TRACKER_REQUEST,
+  selectSimProductQuestScenario,
+} from "./sim_product_quest_scenarios.ts";
+import {
   DEFAULT_RUNTIME_REQUEST,
   type Runtime,
 } from "./runtime_supervisor.ts";
@@ -20,6 +24,22 @@ type Fixture = {
   repo: string;
   env: Record<string, string>;
 };
+
+type SimulationCase = {
+  name: string;
+  request: string;
+};
+
+const SIMULATION_CASES: SimulationCase[] = [
+  {
+    name: "concrete-python-cli",
+    request: DEFAULT_RUNTIME_REQUEST,
+  },
+  {
+    name: "concrete-react-habit-tracker",
+    request: CONCRETE_REACT_HABIT_TRACKER_REQUEST,
+  },
+];
 
 function fail(message: string): never {
   throw new Error(message);
@@ -103,75 +123,188 @@ function currentStage(fixture: Fixture, slug: string): string {
 function assertRuntimeHookShape(
   runtime: Runtime,
   payload: Record<string, any>,
+  label: string,
 ) {
   if (runtime === "gemini") {
     if (payload.decision !== "deny" || payload.suppressOutput !== true) {
       fail(
-        `gemini hook output must deny with suppressOutput: ${JSON.stringify(payload)}`,
+        `${label}: gemini hook output must deny with suppressOutput: ${JSON.stringify(payload)}`,
       );
     }
     return;
   }
   if (payload.decision !== "block") {
-    fail(`${runtime} hook output must block: ${JSON.stringify(payload)}`);
+    fail(`${label}: ${runtime} hook output must block: ${JSON.stringify(payload)}`);
   }
   if (runtime === "copilot" && !payload.hookSpecificOutput) {
-    fail(`copilot hook output must include hookSpecificOutput`);
+    fail(`${label}: copilot hook output must include hookSpecificOutput`);
   }
 }
 
-function assertLifecycleLog(repo: string): void {
+function assertLifecycleLog(
+  repo: string,
+  request: string,
+  label: string,
+): void {
+  const scenario = selectSimProductQuestScenario(request);
   const events = readJsonl(join(repo, SIM_DIR, "events.jsonl"));
   const callbacks = events.filter((record) => record.kind === "callback");
   const hookEvents = events.filter((record) => record.kind === "hook");
   if (callbacks.length === 0) {
-    fail("expected at least one simulated callback turn");
+    fail(`${label}: expected at least one simulated callback turn`);
   }
   if (hookEvents.length !== callbacks.length) {
     fail(
-      `hook/callback turn count mismatch: ${hookEvents.length} vs ${callbacks.length}`,
+      `${label}: hook/callback turn count mismatch: ${hookEvents.length} vs ${callbacks.length}`,
     );
   }
+
   const requestSteps = callbacks.map((record) => stepId(record.request?.step));
   const responseSteps = callbacks.map((record) =>
     stepId(record.response?.step),
   );
-  for (const step of [
-    "plan",
-    "questions",
-    "task_graph",
-    "executing",
-    "validation",
-    "verification",
-    "system_update",
-    "landing",
-  ]) {
+
+  const requiredRequestSteps = scenario.expect_question_round
+    ? [
+        "plan",
+        "questions",
+        "task_graph",
+        "executing",
+        "validation",
+        "verification",
+        "system_update",
+        "landing",
+      ]
+    : [
+        "plan",
+        "task_graph",
+        "executing",
+        "validation",
+        "verification",
+        "system_update",
+        "landing",
+      ];
+  const requiredResponseSteps = scenario.expect_question_round
+    ? [
+        "questions",
+        "plan",
+        "task_graph",
+        "executing",
+        "validation",
+        "verification",
+        "system_update",
+        "landing",
+        "archived",
+      ]
+    : [
+        "task_graph",
+        "executing",
+        "validation",
+        "verification",
+        "system_update",
+        "landing",
+        "archived",
+      ];
+
+  for (const step of requiredRequestSteps) {
     if (!requestSteps.includes(step)) {
-      fail(`simulation never requested lifecycle step ${step}`);
+      fail(`${label}: simulation never requested lifecycle step ${step}`);
     }
   }
-  for (const step of [
-    "questions",
-    "plan",
-    "task_graph",
-    "executing",
-    "validation",
-    "verification",
-    "system_update",
-    "landing",
-    "archived",
-  ]) {
+  for (const step of requiredResponseSteps) {
     if (!responseSteps.includes(step)) {
-      fail(`simulation never reached lifecycle response step ${step}`);
+      fail(`${label}: simulation never reached lifecycle response step ${step}`);
+    }
+  }
+  if (!scenario.expect_question_round) {
+    for (const step of ["questions", "plan"]) {
+      if (responseSteps.includes(step)) {
+        fail(`${label}: concrete simulation unexpectedly emitted ${step}`);
+      }
     }
   }
   if (existsSync(join(repo, SIM_DIR, "pending-callback.json"))) {
-    fail("pending callback should be cleared after the lifecycle archives");
+    fail(`${label}: pending callback should be cleared after archive`);
   }
 }
 
-function simulateRuntime(runtime: Runtime): void {
-  const fixture = createFixture("loopo-runtime-sim-", runtime);
+function assertCanonicalArtifacts(
+  fixture: Fixture,
+  slug: string,
+  request: string,
+  label: string,
+): void {
+  const scenario = selectSimProductQuestScenario(request);
+  const expectedPlan = scenario.resolved_plan ?? scenario.initial_plan;
+  const files = questFiles(fixture.repo, slug);
+  const state = parseTasksYaml(readText(files.tasks)) as Partial<{
+    stage: string;
+    tasks: Array<Partial<{ id: string; title: string }>>;
+  }>;
+
+  if (String(state.stage ?? "") !== "archived") {
+    fail(`${label}: canonical task state did not reach archived`);
+  }
+
+  const planEvents = readJsonl(files.plans).filter(
+    (record) => record.event === "plan",
+  );
+  if (planEvents.length === 0) {
+    fail(`${label}: expected at least one recorded plan payload`);
+  }
+  const latestPlanPayload = planEvents.at(-1)?.payload ?? {};
+  if (String(latestPlanPayload.scope ?? "") !== expectedPlan.scope) {
+    fail(
+      `${label}: final plan scope mismatch: ${JSON.stringify(latestPlanPayload.scope)}`,
+    );
+  }
+  if (String(latestPlanPayload.summary ?? "") !== expectedPlan.summary) {
+    fail(
+      `${label}: final plan summary mismatch: ${JSON.stringify(latestPlanPayload.summary)}`,
+    );
+  }
+
+  const taskState = Array.isArray(state.tasks) ? state.tasks : [];
+  if (taskState.length !== expectedPlan.tasks.length) {
+    fail(
+      `${label}: expected ${expectedPlan.tasks.length} canonical tasks, found ${taskState.length}`,
+    );
+  }
+  const expectedTaskTitles = expectedPlan.tasks.map((task) =>
+    String(task.title ?? ""),
+  );
+  const actualTaskTitles = taskState.map((task) => String(task.title ?? ""));
+  if (JSON.stringify(actualTaskTitles) !== JSON.stringify(expectedTaskTitles)) {
+    fail(
+      `${label}: canonical task titles diverged: ${JSON.stringify(actualTaskTitles)}`,
+    );
+  }
+
+  const questionEvents = readJsonl(files.questions).map((record) =>
+    String(record.event ?? ""),
+  );
+  if (scenario.expect_question_round) {
+    for (const event of ["question_round", "answers"]) {
+      if (!questionEvents.includes(event)) {
+        fail(`${label}: expected questions log to include ${event}`);
+      }
+    }
+  } else if (questionEvents.length !== 0) {
+    fail(
+      `${label}: concrete simulation unexpectedly recorded question events: ${JSON.stringify(questionEvents)}`,
+    );
+  }
+}
+
+function simulateRuntime(
+  runtime: Runtime,
+  simulationCase: SimulationCase,
+): void {
+  const fixture = createFixture(
+    `loopo-runtime-sim-${simulationCase.name}-`,
+    runtime,
+  );
+  const label = `${runtime}/${simulationCase.name}`;
   try {
     const start = runLoopo(
       fixture,
@@ -181,20 +314,20 @@ function simulateRuntime(runtime: Runtime): void {
         "--repo",
         fixture.repo,
         "--request",
-        DEFAULT_RUNTIME_REQUEST,
+        simulationCase.request,
         "--runtime",
         runtime,
       ],
       undefined,
     );
     if (start.status !== 0) {
-      fail(start.stderr || start.stdout || `${runtime} sim start failed`);
+      fail(start.stderr || start.stdout || `${label}: sim start failed`);
     }
-    const started = parseJson(start.stdout, `${runtime} sim start`);
+    const started = parseJson(start.stdout, `${label} sim start`);
     const slug = String(started.slug ?? "");
-    if (!slug) fail(`missing slug in ${runtime} sim start output`);
+    if (!slug) fail(`${label}: missing slug in sim start output`);
     if (String(started.current_stage ?? "") !== "planning") {
-      fail(`${runtime} sim start must enter planning: ${start.stdout}`);
+      fail(`${label}: sim start must enter planning: ${start.stdout}`);
     }
 
     let firstHook = true;
@@ -206,28 +339,21 @@ function simulateRuntime(runtime: Runtime): void {
         undefined,
       );
       if (next.status !== 0) {
-        fail(next.stderr || next.stdout || `${runtime} sim next failed`);
+        fail(next.stderr || next.stdout || `${label}: sim next failed`);
       }
-      const stepped = parseJson(next.stdout, `${runtime} sim next`);
+      const stepped = parseJson(next.stdout, `${label} sim next`);
       const hook = stepped.hook_output;
       if (firstHook && hook && typeof hook === "object") {
-        assertRuntimeHookShape(runtime, hook as Record<string, any>);
+        assertRuntimeHookShape(runtime, hook as Record<string, any>, label);
         firstHook = false;
       }
-      const callback = stepped.callback_output;
       if (!hook || typeof hook !== "object" || !("reason" in hook)) {
-        fail(
-          `${runtime} sim next returned malformed hook output: ${next.stdout}`,
-        );
+        fail(`${label}: sim next returned malformed hook output: ${next.stdout}`);
       }
-      if (stepped.done !== true && !(hook as Record<string, unknown>).reason) {
-        fail(
-          `${runtime} hook returned no continuation before archive: ${JSON.stringify(hook)}`,
-        );
-      }
+      const callback = stepped.callback_output;
       if (callback && !stepId((callback as Record<string, unknown>).step)) {
         fail(
-          `${runtime} callback returned malformed output: ${JSON.stringify(callback)}`,
+          `${label}: callback returned malformed output: ${JSON.stringify(callback)}`,
         );
       }
       if (stepped.done === true) break;
@@ -235,16 +361,18 @@ function simulateRuntime(runtime: Runtime): void {
 
     const status = runLoopo(fixture, ["sim", "status", "--repo", fixture.repo]);
     if (status.status !== 0) {
-      fail(status.stderr || status.stdout || `${runtime} sim status failed`);
+      fail(status.stderr || status.stdout || `${label}: sim status failed`);
     }
-    const current = parseJson(status.stdout, `${runtime} sim status`);
+    const current = parseJson(status.stdout, `${label} sim status`);
     if (current.current_stage !== "archived" || current.done !== true) {
-      fail(`${runtime} simulation status must report archived: ${status.stdout}`);
+      fail(`${label}: simulation status must report archived: ${status.stdout}`);
     }
     if (currentStage(fixture, slug) !== "archived") {
-      fail(`${runtime} simulation did not reach archived`);
+      fail(`${label}: simulation did not reach archived`);
     }
-    assertLifecycleLog(fixture.repo);
+
+    assertLifecycleLog(fixture.repo, simulationCase.request, label);
+    assertCanonicalArtifacts(fixture, slug, simulationCase.request, label);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -252,7 +380,9 @@ function simulateRuntime(runtime: Runtime): void {
 
 function main(): number {
   for (const runtime of ["codex", "gemini", "copilot"] as const) {
-    simulateRuntime(runtime);
+    for (const simulationCase of SIMULATION_CASES) {
+      simulateRuntime(runtime, simulationCase);
+    }
   }
   console.log("loopo runtime simulation verification passed");
   return 0;

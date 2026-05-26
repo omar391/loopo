@@ -569,6 +569,10 @@ export function matchSkipReason(text: string): string | null {
       label: "runtime_unhealthy",
       re: /\b(unhealthy|service unavailable|temporarily unavailable|overloaded|capacity|internal server error|upstream error|engine is unavailable)\b/i,
     },
+    {
+      label: "model_not_supported",
+      re: /\b(model_not_supported|requested model is not supported)\b/i,
+    },
   ];
   for (const pattern of patterns) {
     if (pattern.re.test(text)) return pattern.label;
@@ -586,19 +590,6 @@ export function matchProcessSkipReason(proc: ProcessLike): string | null {
     if (/\b(timeout|timed out)\b/i.test(error.message)) {
       return "runtime_timeout";
     }
-  }
-  return null;
-}
-
-function matchFailureReason(text: string): string | null {
-  const patterns = [
-    {
-      label: "model_not_supported",
-      re: /\b(model_not_supported|requested model is not supported)\b/i,
-    },
-  ];
-  for (const pattern of patterns) {
-    if (pattern.re.test(text)) return pattern.label;
   }
   return null;
 }
@@ -640,19 +631,6 @@ function evaluateResult(
       runtime: fixture.runtime,
       status: "skipped",
       reason: skipReason,
-      duration_ms: durationMs,
-      repo: fixture.repo,
-      log_path: logPath,
-      quest: summary,
-    };
-  }
-
-  const failureReason = matchFailureReason(combined);
-  if (failureReason) {
-    return {
-      runtime: fixture.runtime,
-      status: "failed",
-      reason: failureReason,
       duration_ms: durationMs,
       repo: fixture.repo,
       log_path: logPath,

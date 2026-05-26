@@ -21,6 +21,10 @@ import {
   routeQuestInit,
 } from "./runtime_supervisor.ts";
 import {
+  selectSimProductQuestScenario,
+  type SimPlanPayload,
+} from "./sim_product_quest_scenarios.ts";
+import {
   expandHome,
   readJson,
   readStdinJson,
@@ -434,12 +438,26 @@ function questRequest(repoRoot: string, quest: QuestLikeState): string {
   return request || "loopo: build me a python app";
 }
 
-function productQuestScope(request: string): string {
-  const cleaned = request.replace(/^loopo:\s*/i, "").trim();
-  if (/python/i.test(cleaned) && /\bapp\b/i.test(cleaned)) {
-    return "Build a small Python app from a vague request";
-  }
-  return cleaned || "Build an app from a vague request";
+function planPayload(plan: SimPlanPayload): Record<string, unknown> {
+  return {
+    step: "plan",
+    classification: plan.classification,
+    scope: plan.scope,
+    summary: plan.summary,
+    ...(plan.high_impact_unknowns?.length
+      ? { high_impact_unknowns: plan.high_impact_unknowns }
+      : {}),
+    ...(plan.defaulted_unknowns?.length
+      ? { defaulted_unknowns: plan.defaulted_unknowns }
+      : {}),
+    ...(plan.assumptions?.length ? { assumptions: plan.assumptions } : {}),
+    ...(plan.constraints?.length ? { constraints: plan.constraints } : {}),
+    ...(plan.questions?.length ? { questions: plan.questions } : {}),
+    af: plan.af,
+    of: plan.of,
+    verification_targets: plan.verification_targets,
+    task_graph: { tasks: plan.tasks },
+  };
 }
 
 function buildProductQuestPayload(
@@ -450,149 +468,21 @@ function buildProductQuestPayload(
   state: SimState,
 ): Record<string, unknown> {
   const request = questRequest(repoRoot, quest);
-  const scope = productQuestScope(request);
+  const scenario = selectSimProductQuestScenario(request);
   switch (step) {
     case "plan":
-      if (state.plan_round === 0) {
-        state.plan_round += 1;
-        return {
-          step: "plan",
-          classification: "greenfield_app",
-          scope,
-          high_impact_unknowns: [
-            "delivery surface",
-            "state model",
-            "success criteria",
-          ],
-          questions: [
-            {
-              id: "delivery_surface",
-              question: "Should the Python app default to CLI or web?",
-              impact:
-                "Determines package layout, entrypoints, and verification.",
-            },
-            {
-              id: "state_model",
-              question:
-                "Should the app assume local file storage or in-memory state?",
-              impact: "Changes persistence design and test coverage.",
-            },
-            {
-              id: "success_criteria",
-              question:
-                "What is the smallest definition of done for the first version?",
-              impact: "Bounds scope before decomposition.",
-            },
-          ],
-          af: {
-            hidden_assumptions: [
-              "The request omits product shape, storage, and acceptance boundaries.",
-            ],
-          },
-          of: {
-            procedure: [
-              "clarify delivery shape",
-              "default unresolved choices",
-              "decompose implementation",
-              "verify and land",
-            ],
-          },
-          verification_targets: [
-            "The first question round resolves the high-impact product choices.",
-          ],
-          task_graph: { tasks: [] },
-        };
-      }
       state.plan_round += 1;
-      return {
-        step: "plan",
-        classification: "greenfield_app",
-        scope,
-        defaulted_unknowns: [
-          "Default to a small CLI app with local JSON persistence and pytest coverage.",
-        ],
-        af: {
-          hidden_assumptions: [
-            "A CLI-first Python app is the lowest-risk default for a vague app request.",
-          ],
-        },
-        of: {
-          procedure: [
-            "scaffold project",
-            "implement core logic",
-            "wire CLI surface",
-            "add tests",
-            "verify and land",
-          ],
-        },
-        verification_targets: [
-          "The Python CLI starts successfully.",
-          "Core app behavior is covered by tests.",
-          "Parallel child work is reconciled into one landed quest.",
-        ],
-        task_graph: {
-          tasks: [
-            {
-              id: "t001",
-              title: "Scaffold Python project",
-              type: "coding",
-              acceptance: ["Python project scaffold exists"],
-              scope_files: ["pyproject.toml", "app/__init__.py", "app/main.py"],
-              spec_refs: ["coding"],
-              concurrency_group: "foundation",
-            },
-            {
-              id: "t002",
-              title: "Implement app core",
-              type: "coding",
-              acceptance: ["Core Python app behavior works"],
-              dependencies: ["t001"],
-              scope_files: ["app/core.py", "app/store.py"],
-              spec_refs: ["coding"],
-              concurrency_group: "core",
-            },
-            {
-              id: "t003",
-              title: "Wire CLI entrypoint",
-              type: "coding",
-              acceptance: ["CLI entrypoint runs and documents usage"],
-              dependencies: ["t001"],
-              scope_files: ["app/main.py", "README.md"],
-              spec_refs: ["coding"],
-              concurrency_group: "cli",
-            },
-            {
-              id: "t004",
-              title: "Add test coverage",
-              type: "coding",
-              acceptance: ["Pytest coverage validates core and CLI flows"],
-              dependencies: ["t002", "t003"],
-              scope_files: ["tests/test_core.py", "tests/test_cli.py"],
-              spec_refs: ["coding"],
-              concurrency_group: "tests",
-            },
-          ],
-        },
-      };
+      if (state.plan_round === 1 || !scenario.resolved_plan) {
+        return planPayload(scenario.initial_plan);
+      }
+      return planPayload(scenario.resolved_plan);
     case "questions":
+      if (!scenario.answers.length) {
+        fail(`scenario ${scenario.id} has no recorded answers`);
+      }
       return {
         step: "questions",
-        answers: [
-          {
-            question_id: "delivery_surface",
-            answer: "Default to a CLI app for the first simulated version.",
-          },
-          {
-            question_id: "state_model",
-            answer:
-              "Default to local JSON persistence for deterministic tests.",
-          },
-          {
-            question_id: "success_criteria",
-            answer:
-              "Scaffold, runnable CLI, core behavior, and pytest coverage are enough for v1.",
-          },
-        ],
+        answers: scenario.answers,
       };
     case "task_graph":
       return { step: "task_graph", approved: true };
@@ -604,7 +494,6 @@ function buildProductQuestPayload(
         task_id: task.id,
         child_slug: task.child_slug,
         status: "passed",
-        merge_commit: `sim-${task.id}-merge`,
         evidence: [
           {
             type: "summary",
@@ -619,10 +508,7 @@ function buildProductQuestPayload(
       return {
         step: "validation",
         status: "passed",
-        checks: [
-          { name: "simulated-pytest", status: "passed" },
-          { name: "simulated-cli-smoke", status: "passed" },
-        ],
+        checks: scenario.validation_checks,
       };
     case "verification":
       return {
@@ -644,7 +530,7 @@ function buildProductQuestPayload(
           updates: [
             {
               doc_id: "architecture",
-              summary: "simulated Python app lifecycle completed end to end",
+              summary: scenario.system_summary,
             },
           ],
         },
@@ -662,7 +548,7 @@ function buildProductQuestPayload(
       return {
         step: "landing",
         status: "landed",
-        summary: "simulated Python app landed the quest",
+        summary: scenario.landing_summary,
       };
     default:
       fail(`unsupported callback step: ${step || "(empty)"}`);

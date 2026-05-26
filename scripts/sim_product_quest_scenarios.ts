@@ -1,0 +1,267 @@
+export type SimPlanPayload = {
+  classification: "greenfield_app";
+  scope: string;
+  summary: string;
+  high_impact_unknowns?: string[];
+  defaulted_unknowns?: string[];
+  assumptions?: string[];
+  constraints?: string[];
+  questions?: Array<{
+    id: string;
+    question: string;
+    impact: string;
+    default?: string;
+  }>;
+  af: Record<string, unknown>;
+  of: Record<string, unknown>;
+  verification_targets: string[];
+  tasks: Array<Record<string, unknown>>;
+};
+
+export type SimProductQuestScenario = {
+  id: string;
+  initial_plan: SimPlanPayload;
+  resolved_plan: SimPlanPayload | null;
+  answers: Array<{
+    question_id: string;
+    answer: string;
+  }>;
+  validation_checks: Array<{
+    name: string;
+    status: "passed";
+  }>;
+  system_summary: string;
+  landing_summary: string;
+  expect_question_round: boolean;
+};
+
+function normalizedRequest(request: string): string {
+  return request.replace(/^loopo:\s*/i, "").trim().toLowerCase();
+}
+
+function isConcretePythonCliRequest(request: string): boolean {
+  const normalized = normalizedRequest(request);
+  return (
+    normalized.includes("tiny python cli") &&
+    normalized.includes("argparse") &&
+    normalized.includes("--name") &&
+    normalized.includes("pytest")
+  );
+}
+
+function isConcreteReactHabitTrackerRequest(request: string): boolean {
+  const normalized = normalizedRequest(request);
+  return (
+    normalized.includes("react") &&
+    normalized.includes("habit") &&
+    (normalized.includes("typescript") || normalized.includes("ts"))
+  );
+}
+
+export const CONCRETE_PYTHON_CLI_REQUEST =
+  "loopo: build a tiny python cli named greet using argparse. Accept a required --name flag, print exactly 'hello, <name>!', add one pytest test, keep files minimal, and finish the full lifecycle without asking questions unless a safety-critical ambiguity blocks progress.";
+
+export const CONCRETE_REACT_HABIT_TRACKER_REQUEST =
+  "loopo: build a sample React habit tracker using React with TypeScript, keep it single-user and local-first, no auth, responsive UI, and basic tests";
+
+export function selectSimProductQuestScenario(
+  request: string,
+): SimProductQuestScenario {
+  if (isConcretePythonCliRequest(request)) {
+    return {
+      id: "concrete-python-cli",
+      initial_plan: {
+        classification: "greenfield_app",
+        scope:
+          "Build a tiny Python CLI named greet that accepts a required --name flag and prints exactly `hello, <name>!` with one pytest check.",
+        summary:
+          "The request is already concrete, so the MVP can be delivered in one bounded implementation task without a clarification round.",
+        defaulted_unknowns: [
+          "Use a flat minimal layout with one CLI module and one pytest file.",
+        ],
+        assumptions: [
+          "The requested greeting output is the full product contract for the MVP.",
+        ],
+        constraints: [
+          "Use Python and argparse.",
+          "Accept a required --name flag.",
+          "Print exactly `hello, <name>!`.",
+          "Add one pytest test.",
+          "Keep files minimal.",
+        ],
+        af: {
+          decision:
+            "No clarification is needed because the prompt already fixes the runtime, interface, exact output, and minimum verification surface.",
+        },
+        of: {
+          delivery_strategy: "Use one bounded implementation child.",
+        },
+        verification_targets: [
+          "Running the CLI with --name prints the exact greeting.",
+          "One pytest test passes.",
+          "The lifecycle reaches archive without a clarification round.",
+        ],
+        tasks: [
+          {
+            id: "T001",
+            title: "Build the tiny greet CLI and its pytest coverage",
+            type: "coding",
+            acceptance: [
+              "The greet CLI accepts --name and prints the exact greeting.",
+              "One pytest test covers the CLI behavior.",
+            ],
+            scope_files: ["greet.py", "tests/test_greet.py", "README.md"],
+          },
+        ],
+      },
+      resolved_plan: null,
+      answers: [],
+      validation_checks: [
+        { name: "simulated-pytest", status: "passed" },
+        { name: "simulated-cli-smoke", status: "passed" },
+      ],
+      system_summary: "simulated tiny Python CLI lifecycle completed end to end",
+      landing_summary: "simulated tiny Python CLI landed the quest",
+      expect_question_round: false,
+    };
+  }
+
+  if (isConcreteReactHabitTrackerRequest(request)) {
+    return {
+      id: "concrete-react-habit-tracker",
+      initial_plan: {
+        classification: "greenfield_app",
+        scope:
+          "Build a single-user local-first React + TypeScript habit tracker with a responsive UI and basic tests.",
+        summary:
+          "The request already constrains the product surface, so the simulator should default the remaining low-risk UX details and decompose directly.",
+        defaulted_unknowns: [
+          "Default the MVP to simple daily checkoffs with lightweight streak summaries.",
+          "Persist state in browser localStorage for the local-first MVP.",
+        ],
+        assumptions: [
+          "A single-page browser UI is sufficient for the first version.",
+        ],
+        constraints: [
+          "Use React with TypeScript.",
+          "Keep it single-user and local-first.",
+          "Do not add auth.",
+          "Ship a responsive UI.",
+          "Include basic tests.",
+        ],
+        af: {
+          decision:
+            "No clarification is needed because the request already fixes the stack, user model, persistence posture, and acceptance direction.",
+        },
+        of: {
+          delivery_strategy: "Use one bounded implementation child.",
+        },
+        verification_targets: [
+          "The React habit tracker renders as a responsive single-page UI.",
+          "Habit data persists locally across reloads.",
+          "Basic test coverage validates the core habit flow.",
+          "The lifecycle reaches archive without a clarification round.",
+        ],
+        tasks: [
+          {
+            id: "T001",
+            title: "Build the React habit tracker MVP",
+            type: "coding",
+            acceptance: [
+              "Users can create and complete habits in a responsive single-page UI.",
+              "Habit state persists locally for repeat visits.",
+              "Basic automated tests cover the core habit flow.",
+            ],
+            scope_files: ["package.json", "src/**", "README.md"],
+          },
+        ],
+      },
+      resolved_plan: null,
+      answers: [],
+      validation_checks: [
+        { name: "simulated-vitest", status: "passed" },
+        { name: "simulated-react-smoke", status: "passed" },
+      ],
+      system_summary:
+        "simulated React habit tracker lifecycle completed end to end",
+      landing_summary: "simulated React habit tracker landed the quest",
+      expect_question_round: false,
+    };
+  }
+
+  return {
+    id: "generic-greenfield",
+    initial_plan: {
+      classification: "greenfield_app",
+      scope:
+        "Generic greenfield product request that requires clarification before decomposition.",
+      summary:
+        "Ask one grouped clarification round before turning the request into a concrete MVP plan.",
+      high_impact_unknowns: [
+        "primary app purpose",
+        "delivery surface",
+        "core persistence model",
+      ],
+      questions: [
+        {
+          id: "app_purpose",
+          question: "What is the primary purpose of the app?",
+          impact: "Changes the domain model and the MVP acceptance target.",
+          default: "Task tracker",
+        },
+      ],
+      assumptions: [
+        "The prompt is still product-defining and does not settle the MVP surface.",
+      ],
+      af: {
+        decision:
+          "Clarification is required because the prompt is too generic to decompose safely.",
+      },
+      of: {
+        delivery_strategy:
+          "Pause decomposition until the first clarification round is answered.",
+      },
+      verification_targets: [
+        "The first clarification round resolves the missing product definition.",
+      ],
+      tasks: [],
+    },
+    resolved_plan: {
+      classification: "greenfield_app",
+      scope:
+        "Build a full-stack task tracker for small teams with a React frontend, an Express backend, and SQLite persistence.",
+      summary: "Implement the MVP task tracker in one bounded child task.",
+      defaulted_unknowns: ["No auth for MVP", "Simple list UI"],
+      assumptions: ["All team members share the same permissions."],
+      constraints: ["Use React, Express, and SQLite."],
+      af: {
+        decision:
+          "Constrain the vague request to one coherent MVP slice after clarification.",
+      },
+      of: {
+        delivery_strategy:
+          "Use one dedicated child quest to build the MVP end to end.",
+      },
+      verification_targets: ["Production build succeeds."],
+      tasks: [
+        {
+          id: "T001",
+          title: "Build the MVP task tracker",
+          type: "coding",
+          acceptance: ["The MVP app builds successfully."],
+          scope_files: ["client/**", "server/**"],
+        },
+      ],
+    },
+    answers: [
+      {
+        question_id: "app_purpose",
+        answer: "Build a task tracker for small teams.",
+      },
+    ],
+    validation_checks: [{ name: "simulated-build", status: "passed" }],
+    system_summary: "simulated generic greenfield lifecycle completed end to end",
+    landing_summary: "simulated generic greenfield quest landed successfully",
+    expect_question_round: true,
+  };
+}

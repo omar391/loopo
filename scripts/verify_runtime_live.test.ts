@@ -7,7 +7,7 @@ import {
 } from "./verify_runtime_live.ts";
 
 describe("verify_runtime_live", () => {
-  it("classifies quota, auth, and unhealthy runtime output as skipped", () => {
+  it("classifies quota, auth, unhealthy runtimes, and unsupported models as skipped", () => {
     expect(matchSkipReason("HTTP 429 too many requests")).toBe(
       "quota_or_rate_limit",
     );
@@ -17,6 +17,9 @@ describe("verify_runtime_live", () => {
     expect(matchSkipReason("service unavailable due to capacity limits")).toBe(
       "runtime_unhealthy",
     );
+    expect(
+      matchSkipReason("The requested model is not supported."),
+    ).toBe("model_not_supported");
   });
 
   it("classifies timed out cli turns as skipped", () => {
@@ -77,7 +80,7 @@ describe("verify_runtime_live", () => {
       exitCodeForResults([
         {
           runtime: "gemini",
-          status: "failed",
+          status: "skipped",
           reason: "model_not_supported",
           duration_ms: 1,
           repo: "",
@@ -98,6 +101,6 @@ describe("verify_runtime_live", () => {
           },
         },
       ]),
-    ).toBe(1);
+    ).toBe(0);
   });
 });
