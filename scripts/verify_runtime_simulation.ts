@@ -10,10 +10,7 @@ import {
   scenarioPayloadForStep,
   selectSimProductQuestScenario,
 } from "./sim_product_quest_scenarios.ts";
-import {
-  DEFAULT_RUNTIME_REQUEST,
-  type Runtime,
-} from "./runtime_supervisor.ts";
+import { DEFAULT_RUNTIME_REQUEST, type Runtime } from "./runtime_supervisor.ts";
 import { readText, runCommand, tsRunner } from "./loopo_utils.ts";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -144,7 +141,9 @@ function assertRuntimeHookShape(
     return;
   }
   if (payload.decision !== "block") {
-    fail(`${label}: ${runtime} hook output must block: ${JSON.stringify(payload)}`);
+    fail(
+      `${label}: ${runtime} hook output must block: ${JSON.stringify(payload)}`,
+    );
   }
   if (runtime === "copilot" && !payload.hookSpecificOutput) {
     fail(`${label}: copilot hook output must include hookSpecificOutput`);
@@ -223,7 +222,9 @@ function assertLifecycleLog(
   }
   for (const step of requiredResponseSteps) {
     if (!responseSteps.includes(step)) {
-      fail(`${label}: simulation never reached lifecycle response step ${step}`);
+      fail(
+        `${label}: simulation never reached lifecycle response step ${step}`,
+      );
     }
   }
   if (!scenario.expect_question_round) {
@@ -236,6 +237,38 @@ function assertLifecycleLog(
   if (existsSync(join(repo, SIM_DIR, "pending-callback.json"))) {
     fail(`${label}: pending callback should be cleared after archive`);
   }
+}
+
+function assertChildInitRuntime(
+  callback: Record<string, unknown>,
+  runtime: Runtime,
+  label: string,
+): number {
+  const children = Array.isArray(callback.children) ? callback.children : [];
+  let checked = 0;
+  for (const child of children) {
+    const childRecord =
+      child && typeof child === "object"
+        ? (child as Record<string, unknown>)
+        : {};
+    const commands =
+      childRecord.commands && typeof childRecord.commands === "object"
+        ? (childRecord.commands as Record<string, unknown>)
+        : {};
+    const init =
+      commands.init && typeof commands.init === "object"
+        ? (commands.init as Record<string, unknown>)
+        : {};
+    const initArgs = Array.isArray(init.args) ? init.args : [];
+    const runtimeFlag = initArgs.indexOf("--runtime");
+    if (runtimeFlag < 0 || initArgs[runtimeFlag + 1] !== runtime) {
+      fail(
+        `${label}: child init command must preserve runtime ${runtime}: ${JSON.stringify(initArgs)}`,
+      );
+    }
+    checked += 1;
+  }
+  return checked;
 }
 
 function assertCanonicalArtifacts(
@@ -343,6 +376,7 @@ function simulateRuntime(
     let firstHook = true;
     let planRound = 0;
     let landingRound = 0;
+    let childInitRuntimeChecks = 0;
     for (let guard = 0; guard < 20; guard += 1) {
       if (currentStage(fixture, slug) === "archived") break;
       const next = runLoopo(
@@ -360,7 +394,9 @@ function simulateRuntime(
         firstHook = false;
       }
       if (!hook || typeof hook !== "object" || !("reason" in hook)) {
-        fail(`${label}: sim next returned malformed hook output: ${next.stdout}`);
+        fail(
+          `${label}: sim next returned malformed hook output: ${next.stdout}`,
+        );
       }
       const reasonPayload =
         hook && typeof hook === "object"
@@ -399,11 +435,15 @@ function simulateRuntime(
         );
       }
       const callback = parseJson(callbackProc.stdout, `${label} sim callback`);
+      childInitRuntimeChecks += assertChildInitRuntime(callback, runtime, label);
       if (!stepId((callback as Record<string, unknown>).step)) {
         fail(
           `${label}: callback returned malformed output: ${JSON.stringify(callback)}`,
         );
       }
+    }
+    if (childInitRuntimeChecks === 0) {
+      fail(`${label}: simulation never exposed child init commands`);
     }
 
     const status = runLoopo(fixture, ["sim", "status", "--repo", fixture.repo]);
@@ -412,7 +452,9 @@ function simulateRuntime(
     }
     const current = parseJson(status.stdout, `${label} sim status`);
     if (current.current_stage !== "archived" || current.done !== true) {
-      fail(`${label}: simulation status must report archived: ${status.stdout}`);
+      fail(
+        `${label}: simulation status must report archived: ${status.stdout}`,
+      );
     }
     if (currentStage(fixture, slug) !== "archived") {
       fail(`${label}: simulation did not reach archived`);

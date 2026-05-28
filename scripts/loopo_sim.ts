@@ -327,12 +327,12 @@ function ensureFixtureRepo(repoRoot: string, runtime: Runtime): void {
   }
 }
 
-function setupSimulationHooks(repoRoot: string): void {
+function setupSimulationHooks(repoRoot: string, runtime: Runtime): void {
   const launch = tsRunner(SETUP_RUNTIME_HOOKS_SCRIPT, [
     "--repo",
     repoRoot,
     "--runtime",
-    "all",
+    runtime,
     "--hook-script",
     resolve(SCRIPT_DIR, "loopo_sim.ts"),
   ]);
@@ -453,7 +453,9 @@ function executeCallback(
   output: Record<string, unknown>;
 } {
   if (Object.keys(raw).length === 0) {
-    fail("callback requires an explicit quest-next payload via --json or stdin");
+    fail(
+      "callback requires an explicit quest-next payload via --json or stdin",
+    );
   }
   const pending = loadPendingCallback(repoRoot);
   const reason =
@@ -505,7 +507,7 @@ function runStartMode(args: SimArgs): number {
   const request = normalizeRequestText(args.request);
   const flowId = String(args.flow ?? "swe").trim() || "swe";
   ensureFixtureRepo(repoRoot, runtime);
-  setupSimulationHooks(repoRoot);
+  setupSimulationHooks(repoRoot, runtime);
   resetSimulationArtifacts(repoRoot);
   const started = routeQuestInit({
     repoRoot,
