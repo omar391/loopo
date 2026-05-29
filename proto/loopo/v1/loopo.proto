@@ -71,9 +71,9 @@ service LoopoService {
       path: "sim"
       summary: "Run a simulated Loopo lifecycle step."
       example: {
-        command: "sim start --repo /tmp/loopo-sim --runtime codex --request loopo:build-the-app --flow swe"
-        description: "Start a simulated Loopo lifecycle run."
-        request_json: "{\"mode\":\"start\",\"repo\":\"/tmp/loopo-sim\",\"runtime\":\"codex\",\"request\":\"loopo:build-the-app\",\"flow\":\"swe\"}"
+        command: "sim loopo:build-the-app --repo /tmp/loopo-sim --runtime codex --flow swe"
+        description: "Start a guided simulated Loopo lifecycle run."
+        request_json: "{\"repo\":\"/tmp/loopo-sim\",\"runtime\":\"codex\",\"request\":\"loopo:build-the-app\",\"flow\":\"swe\"}"
       }
     };
   }
@@ -196,12 +196,7 @@ message DoctorRequest {
 }
 
 message SimRequest {
-  string mode = 1 [
-    (cmdproto.v1.param) = {
-      positional: { index: 1 }
-      help: "Simulation mode: start, next, status, hook, or callback."
-    }
-  ];
+  string mode = 1;
 
   string repo = 2 [
     (cmdproto.v1.param) = {
@@ -219,22 +214,22 @@ message SimRequest {
 
   string request = 4 [
     (cmdproto.v1.param) = {
-      flag: { long: "request" }
-      help: "Request text for sim start."
+      positional: { index: 1 }
+      help: "Guided simulation request text."
     }
   ];
 
   string flow = 5 [
     (cmdproto.v1.param) = {
       flag: { long: "flow" }
-      help: "Flow id for sim start."
+      help: "Flow id for guided simulation start."
     }
   ];
 
   google.protobuf.Struct payload = 6 [
     (cmdproto.v1.param) = {
       json: { enabled: true }
-      help: "Optional simulation payload for hook or callback modes."
+      help: "Optional simulation payload for guided continuation or hook passthrough."
     },
     (cmdproto.v1.field_json_schema) = {
       json: "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"type\":\"object\",\"additionalProperties\":true}"

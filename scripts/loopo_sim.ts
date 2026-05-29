@@ -44,7 +44,6 @@ type SimMode = "guided" | "hook";
 
 type SimArgs = {
   mode: SimMode;
-  legacyMode: string | null;
   repo: string | null;
   runtime: string | null;
   json: string | null;
@@ -78,7 +77,7 @@ type QuestLikeState = Partial<{
   }>;
 }>;
 
-const LEGACY_MODES = new Set(["start", "next", "status", "callback"]);
+const RETIRED_COMMANDS = new Set(["start", "next", "status", "callback"]);
 
 function usage(exitCode = 1): number {
   const text = [
@@ -98,7 +97,6 @@ function fail(message: string): never {
 
 function parseArgs(argv: string[]): SimArgs {
   let mode: SimMode = "guided";
-  let legacyMode: string | null = null;
   let repo: string | null = null;
   let runtime: string | null = null;
   let json: string | null = null;
@@ -109,17 +107,8 @@ function parseArgs(argv: string[]): SimArgs {
   if (rest[0] === "hook") {
     mode = "hook";
     rest.shift();
-  } else if (rest[0] && LEGACY_MODES.has(rest[0])) {
-    legacyMode = rest.shift() ?? null;
-    return {
-      mode,
-      legacyMode,
-      repo,
-      runtime,
-      json,
-      request: null,
-      flow,
-    };
+  } else if (rest[0] && RETIRED_COMMANDS.has(rest[0])) {
+    throw new Error(`unknown sim command: ${rest[0]}`);
   }
 
   for (let i = 0; i < rest.length; i += 1) {
@@ -140,22 +129,12 @@ function parseArgs(argv: string[]): SimArgs {
 
   return {
     mode,
-    legacyMode,
     repo,
     runtime,
     json,
     request: requestParts.join(" ").trim() || null,
     flow,
   };
-}
-
-function legacyModeError(mode: string): string {
-  return [
-    `loopo sim ${mode} has been replaced by the guided sim flow.`,
-    'Start with: loopo sim "loopo: <request>" --flow swe --runtime codex',
-    "Continue with the returned commands.next, usually: loopo sim --repo <repo> --json @-",
-    "Use loopo sim hook only for explicit runtime hook passthrough testing.",
-  ].join("\n");
 }
 
 function resolveRuntime(
@@ -586,16 +565,13 @@ export function runSimCli(argv: string[]): number {
     }
     if (
       error instanceof Error &&
-      error.message.startsWith("unknown sim argument:")
+      (error.message.startsWith("unknown sim argument:") ||
+        error.message.startsWith("unknown sim command:"))
     ) {
       console.error(error.message);
       return usage(1);
     }
     throw error;
-  }
-  if (args.legacyMode) {
-    console.error(legacyModeError(args.legacyMode));
-    return 1;
   }
   if (args.mode === "hook") return runHookMode(args);
   return runGuidedMode(args);

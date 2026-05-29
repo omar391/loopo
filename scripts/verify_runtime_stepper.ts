@@ -74,14 +74,22 @@ function simArgsFromStep(step: Record<string, any>): string[] {
   return args.slice(1).map(String);
 }
 
-function assertLegacyModeGuidance(): void {
-  const legacy = runSim(["start", "--request", "loopo: old path"]);
-  if (legacy.status === 0) {
-    fail(`legacy sim start unexpectedly succeeded: ${legacy.stdout}`);
-  }
-  const combined = `${legacy.stderr}\n${legacy.stdout}`;
-  if (!combined.includes("replaced by the guided sim flow")) {
-    fail(`legacy sim start must print migration guidance: ${combined}`);
+function assertRetiredCommandsAreUnknown(): void {
+  const cases = [
+    ["start", "--request", "loopo: old path"],
+    ["next", "--repo", "/tmp/loopo-sim-old"],
+    ["callback", "--repo", "/tmp/loopo-sim-old", "--json", "{}"],
+    ["status", "--repo", "/tmp/loopo-sim-old"],
+  ];
+  for (const args of cases) {
+    const retired = runSim(args);
+    if (retired.status === 0) {
+      fail(`retired sim command unexpectedly succeeded: ${retired.stdout}`);
+    }
+    const combined = `${retired.stderr}\n${retired.stdout}`;
+    if (!combined.includes(`unknown sim command: ${args[0]}`)) {
+      fail(`retired sim command must hard-fail as unknown: ${combined}`);
+    }
   }
 }
 
@@ -90,7 +98,7 @@ function main(): number {
   const repo = join(root, "repo");
   const request = "loopo: a fullstack app";
   try {
-    assertLegacyModeGuidance();
+    assertRetiredCommandsAreUnknown();
 
     const start = runSim([
       request,
