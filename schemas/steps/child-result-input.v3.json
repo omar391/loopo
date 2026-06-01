@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://loopo.dev/schemas/steps/child-result-input.v3.json",
+  "$id": "schemas/steps/child-result-input.v3.json",
   "title": "Loopo V3 Child Result Input",
   "type": "object",
   "additionalProperties": false,
@@ -25,7 +25,7 @@
     "evidence": {
       "type": "array",
       "items": {
-        "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/evidence"
+        "$ref": "common.v3.json#/$defs/evidence"
       }
     },
     "branch_ref": { "type": "string" },

@@ -8,34 +8,32 @@ import {
   loadStepDefinitions,
 } from "./loopo_flow.ts";
 import {
-  FLOW_SCHEMA_ID,
-  STEP_DEFINITION_SCHEMA_ID,
+  FLOW_SCHEMA_PATH,
+  STEP_DEFINITION_SCHEMA_PATH,
   V3_STEP_SCHEMAS,
   validateV3Input,
-  validateSchemaId,
+  validateSchemaPath,
 } from "./loopo_schema.ts";
 
 const command = {
   cmd: "loopo",
-  args: ["quest", "help"],
-  display: "loopo quest help",
+  args: ["quest", "next", "--wtree", "demo", "--json", "@-"],
 };
 
 const schemaRef = {
-  schema_id: "https://loopo.dev/schemas/steps/next-input.v3.json",
-  schema_path: "/tmp/next-input.v3.json",
+  schema_path: "schemas/steps/next-input.v3.json",
 };
 
 const embeddedCallbackSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
-  $id: "https://loopo.dev/schemas/steps/plan-input.v3.json",
+  $id: "schemas/steps/plan-input.v3.json",
   title: "Loopo V3 Plan Input",
   type: "object",
 };
 
 const embeddedChildResultSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
-  $id: "https://loopo.dev/schemas/steps/child-result-input.v3.json",
+  $id: "schemas/steps/child-result-input.v3.json",
   title: "Loopo V3 Child Result Input",
   type: "object",
 };
@@ -96,8 +94,8 @@ const validStepDefinition = {
 const baseStepOutput = {
   schema_version: 3,
   kind: "quest_step",
-  schema_id: "https://loopo.dev/schemas/steps/step-output.v3.json",
-  slug: "demo",
+  schema_path: "schemas/steps/step-output.v3.json",
+  wtree: "demo",
   quest_id: "demo",
   flow_id: "swe",
   flow_version: 1,
@@ -118,7 +116,7 @@ const baseStepOutput = {
       instructions: "# Loopo Plan Step\n\nPlan with clarification details.",
     },
   },
-  commands: { next: command, help: command },
+  commands: { next: command },
   docs,
 };
 
@@ -126,36 +124,34 @@ const validPayloads: Record<string, Record<string, unknown>> = {
   "init-output": {
     schema_version: 3,
     kind: "init_route",
-    schema_id: "https://loopo.dev/schemas/steps/init-output.v3.json",
+    schema_path: "schemas/steps/init-output.v3.json",
     request: "loopo: demo",
-    cwd: "/tmp/repo",
     runtime: "codex",
     flow_id: "swe",
     flow_version: 1,
     candidates: [],
     new_quest: {
-      suggested_slug: "demo",
+      suggested_wtree: "demo",
       command,
       callback_schema: {
         $schema: "https://json-schema.org/draft/2020-12/schema",
-        $id: "https://loopo.dev/schemas/steps/next-input.v3.json",
+        $id: "schemas/steps/next-input.v3.json",
         title: "Loopo V3 Next Input",
         type: "object",
       },
       input: {
         step: "select_quest",
         action: "create_quest",
-        slug: "demo",
+        wtree: "demo",
         flow_id: "swe",
         request: "loopo: demo",
       },
     },
-    help: command,
   },
   "next-input": {
     step: "select_quest",
     action: "create_quest",
-    slug: "demo",
+    wtree: "demo",
     flow_id: "swe",
     request: "loopo: demo",
   },
@@ -163,37 +159,12 @@ const validPayloads: Record<string, Record<string, unknown>> = {
   "error-output": {
     schema_version: 3,
     kind: "error",
-    schema_id: "https://loopo.dev/schemas/steps/error-output.v3.json",
+    schema_path: "schemas/steps/error-output.v3.json",
     error: "callback schema validation failed",
-    slug: "demo",
+    wtree: "demo",
     state: "planning",
     schema: schemaRef,
     errors: ["/extra is not allowed"],
-  },
-  "help-output": {
-    schema_version: 3,
-    kind: "help",
-    schema_id: "https://loopo.dev/schemas/steps/help-output.v3.json",
-    step: "help",
-    state: "help",
-    summary: "Help",
-    guide: {
-      purpose: "Use loopo",
-      launcher: "loopo init",
-      rules: ["Use schemas"],
-      commands: [{ name: "help", command: "loopo quest help", use: "read" }],
-    },
-    schemas: [{ name: "next-input", ...schemaRef }],
-    flows: [
-      {
-        id: "swe",
-        version: 1,
-        default_stage: "planning",
-        stages: [],
-        subflows: [],
-      },
-    ],
-    commands: { init: command, next: command, help: command, hook: command },
   },
   "plan-input": {
     step: "plan",
@@ -213,7 +184,7 @@ const validPayloads: Record<string, Record<string, unknown>> = {
   "task-graph-input": { step: "task_graph", approved: true },
   "child-dispatch-output": {
     ...baseStepOutput,
-    schema_id: "https://loopo.dev/schemas/steps/child-dispatch-output.v3.json",
+    schema_path: "schemas/steps/child-dispatch-output.v3.json",
     step: "executing",
     state: "executing",
     callback_schema: embeddedChildResultSchema,
@@ -275,7 +246,7 @@ const validPayloads: Record<string, Record<string, unknown>> = {
   },
   "archive-output": {
     ...baseStepOutput,
-    schema_id: "https://loopo.dev/schemas/steps/archive-output.v3.json",
+    schema_path: "schemas/steps/archive-output.v3.json",
     step: "archived",
     state: "archived",
     callback_schema: null,
@@ -307,8 +278,8 @@ const validPayloads: Record<string, Record<string, unknown>> = {
   "lock-error": {
     schema_version: 3,
     kind: "lock_error",
-    schema_id: "https://loopo.dev/schemas/steps/lock-error.v3.json",
-    slug: "demo",
+    schema_path: "schemas/steps/lock-error.v3.json",
+    wtree: "demo",
     lock: {
       path: "/tmp/lock.json",
       pid: 123,
@@ -319,24 +290,24 @@ const validPayloads: Record<string, Record<string, unknown>> = {
 
 describe("loopo strict v3 step schemas", () => {
   it("accepts and rejects flow YAML and step definition YAML schemas", () => {
-    expect(validateSchemaId(validFlow, FLOW_SCHEMA_ID)).toEqual([]);
+    expect(validateSchemaPath(validFlow, FLOW_SCHEMA_PATH)).toEqual([]);
     expect(
-      validateSchemaId({ ...validFlow, extra: true }, FLOW_SCHEMA_ID).length,
+      validateSchemaPath({ ...validFlow, extra: true }, FLOW_SCHEMA_PATH).length,
     ).toBeGreaterThan(0);
     expect(
-      validateSchemaId(
+      validateSchemaPath(
         { ...validFlow, stages: [{ id: "planning", step: "plan" }] },
-        FLOW_SCHEMA_ID,
+        FLOW_SCHEMA_PATH,
       ).length,
     ).toBeGreaterThan(0);
 
     expect(
-      validateSchemaId(validStepDefinition, STEP_DEFINITION_SCHEMA_ID),
+      validateSchemaPath(validStepDefinition, STEP_DEFINITION_SCHEMA_PATH),
     ).toEqual([]);
     expect(
-      validateSchemaId(
+      validateSchemaPath(
         { ...validStepDefinition, instructions: "" },
-        STEP_DEFINITION_SCHEMA_ID,
+        STEP_DEFINITION_SCHEMA_PATH,
       ).length,
     ).toBeGreaterThan(0);
   });

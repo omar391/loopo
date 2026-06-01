@@ -1,18 +1,17 @@
 # @omar391/loopo
 
-Publishable Loopo runtime package for deterministic V3 slug-based quest workflows.
+Publishable Loopo runtime package for deterministic V3 worktree-based quest workflows.
 
 ```bash
-npx @omar391/loopo init "loopo: build the app" --cwd "$PWD" --runtime codex
-node index.ts init "loopo: build the app" --cwd "$PWD" --runtime codex --flow swe
-node index.ts quest next --slug build-the-app --json @request.json
-node index.ts quest help
+npx @omar391/loopo init "loopo: build the app" --runtime codex
+node index.ts init "loopo: build the app" --runtime codex --flow swe
+node index.ts quest next --wtree build-the-app --json @request.json
 node index.ts hook --runtime codex
-node index.ts sim "loopo: build me a python app" --runtime codex --flow swe
-node index.ts sim --repo /tmp/loopo-sim/repo --json @request.json
-node index.ts sim hook --repo /tmp/loopo-sim/repo --runtime codex
+node index.ts sim init "loopo: build me a python app" --runtime codex --flow swe
+node index.ts sim quest next --wtree build-me-a-python-app --json @request.json
+node index.ts sim hook --runtime codex
 node index.ts doctor --fix
-node index.ts cmdproto execjson init '{"request":"loopo:build-the-app","cwd":"/repo","runtime":"codex"}'
+node index.ts cmdproto execjson init '{"request":"loopo:build-the-app","repo":"/repo","runtime":"codex"}'
 ```
 
 The launcher skill lives in
@@ -25,15 +24,14 @@ YAML, and `schemas/steps`. Flow and step-definition YAML are schema-backed by
 `cmdproto` is wired in as a transparent command wrapper. `loopo cmdproto`
 mirrors the current public command paths through `cmdproto execjson <path> <payload>`,
 while still delegating to the existing `loopo init`, `loopo quest next`,
-`loopo quest help`, `loopo hook`, `loopo doctor`, and `loopo sim` command
-logic. The V3 lifecycle state machine and JSON Schema payload contracts remain
-authoritative.
+`loopo hook`, `loopo doctor`, and `loopo sim` command logic. The V3 lifecycle
+state machine and JSON Schema payload contracts remain authoritative.
 
 Loopo lifecycle guidance lives in `assets/steps/*.yaml`; do not add separate
 stage spec files for the same instructions.
 
 For mocked runtime lifecycle stepping, `loopo sim` supports:
 
-- `loopo sim "loopo: <request>" --flow swe --runtime codex`: create an isolated simulated repo and emit the first selected-flow step
-- `loopo sim --repo <repo> --json @-`: submit the next step payload and stop at the next selected-flow step
+- `loopo sim init "loopo: <request>" --repo <repo> --flow swe --runtime codex`: start a simulation and emit the first selected-flow step
+- `loopo sim quest next --wtree <name> --repo <repo> --json @-`: submit the next step payload and stop at the next selected-flow step
 - `loopo sim hook --repo <repo> --runtime codex --json @-`: explicitly exercise runtime hook passthrough behavior

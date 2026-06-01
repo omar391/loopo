@@ -3,7 +3,7 @@
 import Ajv2020 from "ajv/dist/2020.js";
 import type { ErrorObject } from "ajv";
 import { existsSync, readdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readJson } from "./loopo_utils.ts";
 
@@ -17,16 +17,13 @@ type JsonValue =
   | { [key: string]: JsonValue };
 type JsonObject = { [key: string]: JsonValue };
 
-export const LOOPO_SCHEMA_BASE = "https://loopo.dev/schemas";
-export const FLOW_SCHEMA_ID = `${LOOPO_SCHEMA_BASE}/flow.v1.json`;
-export const STEP_DEFINITION_SCHEMA_ID = `${LOOPO_SCHEMA_BASE}/step-definition.v1.json`;
-export const V3_SCHEMA_BASE = "https://loopo.dev/schemas/steps";
+export const FLOW_SCHEMA_PATH = "schemas/flow.v1.json";
+export const STEP_DEFINITION_SCHEMA_PATH = "schemas/step-definition.v1.json";
 export const V3_STEP_SCHEMAS = [
   "init-output",
   "next-input",
   "step-output",
   "error-output",
-  "help-output",
   "plan-input",
   "questions-input",
   "task-graph-input",
@@ -41,24 +38,22 @@ export const V3_STEP_SCHEMAS = [
   "lock-error",
 ] as const;
 
-export function v3SchemaId(name: string): string {
-  return `${V3_SCHEMA_BASE}/${name}.v3.json`;
+export function v3SchemaPath(name: string): string {
+  return `schemas/steps/${name}.v3.json`;
 }
 
-export function v3SchemaPath(name: string): string {
-  return resolve(ROOT, "schemas", "steps", `${name}.v3.json`);
+export function v3SchemaFilePath(name: string): string {
+  return resolve(ROOT, v3SchemaPath(name));
 }
 
 export function loopoSchemaRef(name: string): Record<string, string> {
   return {
-    schema_id: `${LOOPO_SCHEMA_BASE}/${name}.json`,
-    schema_path: resolve(ROOT, "schemas", `${name}.json`),
+    schema_path: `schemas/${name}.json`,
   };
 }
 
 export function v3SchemaRef(name: string): Record<string, string> {
   return {
-    schema_id: v3SchemaId(name),
     schema_path: v3SchemaPath(name),
   };
 }
@@ -67,41 +62,34 @@ function cloneJson<T extends JsonValue>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function loopoSchemaPathForId(schemaId: string): string | null {
-  if (schemaId.startsWith(`${V3_SCHEMA_BASE}/`) && schemaId.endsWith(".json")) {
-    return resolve(
-      ROOT,
-      "schemas",
-      "steps",
-      schemaId.slice(`${V3_SCHEMA_BASE}/`.length),
-    );
+function localSchemaFilePath(schemaPath: string): string {
+  const path = schemaPath.trim();
+  if (!path.endsWith(".json")) {
+    throw new Error(`unsupported local schema path: ${schemaPath}`);
   }
-  if (
-    schemaId.startsWith(`${LOOPO_SCHEMA_BASE}/`) &&
-    schemaId.endsWith(".json")
-  ) {
-    return resolve(
-      ROOT,
-      "schemas",
-      schemaId.slice(`${LOOPO_SCHEMA_BASE}/`.length),
-    );
-  }
-  return null;
+  return isAbsolute(path) ? path : resolve(ROOT, path);
 }
 
 const cachedSchemaDocuments = new Map<string, JsonObject>();
 
-function readSchemaById(schemaId: string): JsonObject {
-  const cached = cachedSchemaDocuments.get(schemaId);
+function readSchemaByPath(schemaPath: string): JsonObject {
+  const cached = cachedSchemaDocuments.get(schemaPath);
   if (cached) return cached;
-  const path = loopoSchemaPathForId(schemaId);
-  if (!path) throw new Error(`unsupported local schema ref: ${schemaId}`);
+  const path = localSchemaFilePath(schemaPath);
   const schema = readJson(path) as JsonValue;
   if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
-    throw new Error(`schema must be an object: ${schemaId}`);
+    throw new Error(`schema must be an object: ${schemaPath}`);
   }
-  cachedSchemaDocuments.set(schemaId, schema as JsonObject);
+  cachedSchemaDocuments.set(schemaPath, schema as JsonObject);
   return schema as JsonObject;
+}
+
+function resolveSchemaRefPath(refPath: string, currentSchemaPath: string): string {
+  const path = refPath.trim();
+  if (!path) return currentSchemaPath;
+  if (path.startsWith("schemas/")) return path;
+  if (isAbsolute(path)) return path;
+  return normalize(`${dirname(currentSchemaPath)}/${path}`);
 }
 
 function pointerToken(token: string): string {
@@ -131,32 +119,35 @@ function resolveJsonPointer(schema: JsonObject, fragment: string): JsonValue {
 
 function dereferenceSchemaValue(
   value: JsonValue,
-  currentSchemaId: string,
+  currentSchemaPath: string,
   currentSchema: JsonObject,
   seenRefs: Set<string>,
 ): JsonValue {
   if (Array.isArray(value)) {
     return value.map((item) =>
-      dereferenceSchemaValue(item, currentSchemaId, currentSchema, seenRefs),
+      dereferenceSchemaValue(item, currentSchemaPath, currentSchema, seenRefs),
     );
   }
   if (!value || typeof value !== "object") return value;
 
   const ref = value.$ref;
   if (typeof ref === "string") {
-    const [refSchemaIdRaw, fragmentRaw = ""] = ref.split("#", 2);
-    const refSchemaId = refSchemaIdRaw || currentSchemaId;
+    const [refSchemaPathRaw, fragmentRaw = ""] = ref.split("#", 2);
+    const refSchemaPath = resolveSchemaRefPath(
+      refSchemaPathRaw,
+      currentSchemaPath,
+    );
     const fragment = fragmentRaw ? `#${fragmentRaw}` : "";
-    const refKey = `${refSchemaId}${fragment}`;
+    const refKey = `${refSchemaPath}${fragment}`;
     if (seenRefs.has(refKey)) throw new Error(`cyclic schema ref: ${refKey}`);
     const refSchema =
-      refSchemaId === currentSchemaId
+      refSchemaPath === currentSchemaPath
         ? currentSchema
-        : readSchemaById(refSchemaId);
+        : readSchemaByPath(refSchemaPath);
     seenRefs.add(refKey);
     const resolved = dereferenceSchemaValue(
       cloneJson(resolveJsonPointer(refSchema, fragment)),
-      refSchemaId,
+      refSchemaPath,
       refSchema,
       seenRefs,
     );
@@ -170,7 +161,7 @@ function dereferenceSchemaValue(
           key,
           dereferenceSchemaValue(
             item,
-            currentSchemaId,
+            currentSchemaPath,
             currentSchema,
             seenRefs,
           ),
@@ -184,7 +175,7 @@ function dereferenceSchemaValue(
           key,
           dereferenceSchemaValue(
             item,
-            currentSchemaId,
+            currentSchemaPath,
             currentSchema,
             seenRefs,
           ),
@@ -196,17 +187,17 @@ function dereferenceSchemaValue(
   return Object.fromEntries(
     Object.entries(value).map(([key, item]) => [
       key,
-      dereferenceSchemaValue(item, currentSchemaId, currentSchema, seenRefs),
+      dereferenceSchemaValue(item, currentSchemaPath, currentSchema, seenRefs),
     ]),
   );
 }
 
 export function dereferencedV3Schema(name: string): Record<string, unknown> {
-  const schemaId = v3SchemaId(name);
-  const schema = readSchemaById(schemaId);
+  const schemaPath = v3SchemaPath(name);
+  const schema = readSchemaByPath(schemaPath);
   return dereferenceSchemaValue(
     cloneJson(schema),
-    schemaId,
+    schemaPath,
     schema,
     new Set<string>(),
   ) as Record<string, unknown>;
@@ -263,18 +254,18 @@ export function validateV3Input(
   payload: Record<string, any>,
   schemaName: string,
 ): string[] {
-  const validate = ajv().getSchema(v3SchemaId(schemaName));
+  const validate = ajv().getSchema(v3SchemaPath(schemaName));
   if (!validate) return [`input schema not found: ${schemaName}`];
   if (validate(payload)) return [];
   return (validate.errors ?? []).map(formatError);
 }
 
-export function validateSchemaId(
+export function validateSchemaPath(
   payload: Record<string, any>,
-  schemaId: string,
+  schemaPath: string,
 ): string[] {
-  const validate = ajv().getSchema(schemaId);
-  if (!validate) return [`input schema not found: ${schemaId}`];
+  const validate = ajv().getSchema(schemaPath);
+  if (!validate) return [`input schema not found: ${schemaPath}`];
   if (validate(payload)) return [];
   return (validate.errors ?? []).map(formatError);
 }

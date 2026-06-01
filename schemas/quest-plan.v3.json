@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://loopo.dev/schemas/quest-plan.v3.json",
+  "$id": "schemas/quest-plan.v3.json",
   "title": "Loopo Quest Plan v3",
   "type": "object",
   "additionalProperties": true,

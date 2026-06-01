@@ -42,7 +42,7 @@ export type MatrixScenario = {
 export type MatrixScenarioResult = {
   id: string;
   prompt: string;
-  slug: string;
+  wtree: string;
   classification: string;
   child_count: number;
   archived: boolean;
@@ -106,7 +106,7 @@ export function createFixture(prefix: string): MatrixFixture {
 
 function next(
   fixture: MatrixFixture,
-  slug: string,
+  wtree: string,
   payload: Record<string, unknown>,
 ): Record<string, unknown> {
   const proc = runLoopo(
@@ -114,10 +114,8 @@ function next(
     [
       "quest",
       "next",
-      "--slug",
-      slug,
-      "--cwd",
-      fixture.repo,
+      "--wtree",
+      wtree,
       "--json",
       "@-",
       "--full",
@@ -158,10 +156,10 @@ function childResultPayload(taskId: string, childSlug: string, worktreePath: str
 function routeAndCreateQuest(
   fixture: MatrixFixture,
   prompt: string,
-): { slug: string; route: any; created: Record<string, unknown> } {
+): { wtree: string; route: any; created: Record<string, unknown> } {
   const init = runLoopo(
     fixture.repo,
-    ["init", prompt, "--cwd", fixture.repo, "--runtime", "codex"],
+    ["init", prompt, "--runtime", "codex"],
     undefined,
     fixture.env,
   );
@@ -172,22 +170,22 @@ function routeAndCreateQuest(
   expect(route.new_quest.command.args).toEqual(
     expect.arrayContaining(["quest", "next"]),
   );
-  const slug = String(route.new_quest.suggested_slug);
-  const created = next(fixture, slug, route.new_quest.input);
+  const wtree = String(route.new_quest.suggested_wtree);
+  const created = next(fixture, wtree, route.new_quest.input);
   expectValidSchema(created, "step-output");
-  return { slug, route, created };
+  return { wtree, route, created };
 }
 
 function driveScenario(
   fixture: MatrixFixture,
   scenario: MatrixScenario,
 ): MatrixScenarioResult {
-  const { slug, created } = routeAndCreateQuest(fixture, scenario.prompt);
+  const { wtree, created } = routeAndCreateQuest(fixture, scenario.prompt);
   expect(created.step).toBe("plan");
 
   let questionRoundUsed = false;
   if (scenario.questions?.length) {
-    const awaiting = next(fixture, slug, {
+    const awaiting = next(fixture, wtree, {
       step: "plan",
       classification: scenario.classification,
       scope: scenario.scope,
@@ -201,7 +199,7 @@ function driveScenario(
     expectValidSchema(awaiting, "step-output");
     expect(awaiting.step).toBe("questions");
     questionRoundUsed = true;
-    const backToPlanning = next(fixture, slug, {
+    const backToPlanning = next(fixture, wtree, {
       step: "questions",
       answers: scenario.preplanAnswers ?? [],
     });
@@ -209,7 +207,7 @@ function driveScenario(
     expect(backToPlanning.step).toBe("plan");
   }
 
-  const planned = next(fixture, slug, {
+  const planned = next(fixture, wtree, {
     step: "plan",
     classification: scenario.classification,
     scope: scenario.scope,
@@ -225,7 +223,7 @@ function driveScenario(
   expectValidSchema(planned, "step-output");
   expect(planned.step).toBe("task_graph");
 
-  const executing = next(fixture, slug, {
+  const executing = next(fixture, wtree, {
     step: "task_graph",
     approved: true,
   });
@@ -244,8 +242,8 @@ function driveScenario(
     expect(child.commands.init.args).toEqual(
       expect.arrayContaining([
         "init",
-        "--cwd",
-        child.worktree_path,
+        "--wtree",
+        child.child_slug,
         "--runtime",
         "codex",
       ]),
@@ -257,7 +255,7 @@ function driveScenario(
   for (const child of children) {
     next(
       fixture,
-      slug,
+      wtree,
       childResultPayload(
         String(child.task_id),
         String(child.child_slug),
@@ -266,7 +264,7 @@ function driveScenario(
     );
   }
 
-  const validated = next(fixture, slug, {
+  const validated = next(fixture, wtree, {
     step: "validation",
     status: "passed",
     checks: [{ name: `${scenario.id}-smoke`, status: "passed" }],
@@ -274,7 +272,7 @@ function driveScenario(
   expectValidSchema(validated, "step-output");
   expect(validated.step).toBe("verification");
 
-  const verified = next(fixture, slug, {
+  const verified = next(fixture, wtree, {
     step: "verification",
     status: "passed",
     acceptance_trace: scenario.tasks.map((task) => ({
@@ -286,7 +284,7 @@ function driveScenario(
   expectValidSchema(verified, "step-output");
   expect(verified.step).toBe("system_update");
 
-  const landing = next(fixture, slug, {
+  const landing = next(fixture, wtree, {
     step: "system_update",
     system_update: {
       schema_version: 1,
@@ -296,7 +294,7 @@ function driveScenario(
   expectValidSchema(landing, "step-output");
   expect(landing.step).toBe("landing");
 
-  const archived = next(fixture, slug, {
+  const archived = next(fixture, wtree, {
     step: "landing",
     status: "landed",
     summary: `${scenario.id} complete`,
@@ -304,12 +302,12 @@ function driveScenario(
   expectValidSchema(archived, "archive-output");
   expect(archived.step).toBe("archived");
 
-  const finalState = latestQuestState(fixture, slug);
+  const finalState = latestQuestState(fixture, wtree);
   const finalTasks = Array.isArray(finalState.tasks) ? finalState.tasks : [];
   return {
     id: scenario.id,
     prompt: scenario.prompt,
-    slug,
+    wtree,
     classification: scenario.classification,
     child_count: children.length,
     archived: String(finalState.stage) === "archived",

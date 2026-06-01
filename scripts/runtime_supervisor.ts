@@ -17,7 +17,7 @@ export type InitRouteResult = {
   routeProc: RunResult;
   createInput: Record<string, unknown> | null;
   createOutput: Record<string, unknown>;
-  slug: string;
+  wtree: string;
 };
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -121,19 +121,22 @@ export function routeQuestInit(params: {
   runtime: Runtime;
   request: string;
   flowId?: string | null;
+  wtree?: string | null;
   timeoutMs?: number;
 }): InitRouteResult {
   const initArgs = [
     "init",
     params.request,
-    "--cwd",
-    params.repoRoot,
     "--runtime",
     params.runtime,
   ];
   const flowId = String(params.flowId ?? "").trim();
   if (flowId) {
     initArgs.push("--flow", flowId);
+  }
+  const requestedWtree = String(params.wtree ?? "").trim();
+  if (requestedWtree) {
+    initArgs.push("--wtree", requestedWtree);
   }
   const init = runLoopoCommand(
     params.repoRoot,
@@ -150,8 +153,8 @@ export function routeQuestInit(params: {
     route.new_quest && typeof route.new_quest === "object"
       ? (route.new_quest as Record<string, unknown>)
       : {};
-  const slug = String(newQuest.suggested_slug ?? "").trim();
-  if (!slug) fail(`missing slug in init output: ${init.stdout}`);
+  const wtree = String(newQuest.suggested_wtree ?? "").trim();
+  if (!wtree) fail(`missing wtree in init output: ${init.stdout}`);
 
   const createInput =
     newQuest.input && typeof newQuest.input === "object"
@@ -192,6 +195,6 @@ export function routeQuestInit(params: {
     routeProc,
     createInput,
     createOutput: parseJsonObject(routeProc.stdout, "route output"),
-    slug,
+    wtree,
   };
 }

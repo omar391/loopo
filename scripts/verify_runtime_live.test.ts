@@ -60,8 +60,7 @@ describe("verify_runtime_live", () => {
           repo: "",
           log_path: "",
           quest: {
-            primary_slug: null,
-            latest_slug: null,
+            wtree: null,
             stage: null,
             child_count: 0,
             merged_child_count: 0,
@@ -86,8 +85,7 @@ describe("verify_runtime_live", () => {
           repo: "",
           log_path: "",
           quest: {
-            primary_slug: null,
-            latest_slug: null,
+            wtree: null,
             stage: null,
             child_count: 0,
             merged_child_count: 0,

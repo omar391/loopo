@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://loopo.dev/schemas/steps/plan-input.v3.json",
+  "$id": "schemas/steps/plan-input.v3.json",
   "title": "Loopo V3 Plan Input",
   "type": "object",
   "additionalProperties": false,
@@ -23,25 +23,25 @@
     "clarification_matrix": {
       "type": "array",
       "items": {
-        "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/question"
+        "$ref": "common.v3.json#/$defs/question"
       }
     },
     "high_impact_unknowns": {
-      "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/string_array"
+      "$ref": "common.v3.json#/$defs/string_array"
     },
     "defaulted_unknowns": {
-      "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/string_array"
+      "$ref": "common.v3.json#/$defs/string_array"
     },
     "assumptions": {
-      "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/string_array"
+      "$ref": "common.v3.json#/$defs/string_array"
     },
     "constraints": {
-      "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/string_array"
+      "$ref": "common.v3.json#/$defs/string_array"
     },
     "questions": {
       "type": "array",
       "items": {
-        "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/question"
+        "$ref": "common.v3.json#/$defs/question"
       }
     },
     "af": {
@@ -51,7 +51,7 @@
       "type": "object"
     },
     "verification_targets": {
-      "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/string_array"
+      "$ref": "common.v3.json#/$defs/string_array"
     },
     "task_graph": {
       "type": "object",
@@ -61,7 +61,7 @@
         "tasks": {
           "type": "array",
           "items": {
-            "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/task_graph_task"
+            "$ref": "common.v3.json#/$defs/task_graph_task"
           }
         }
       }

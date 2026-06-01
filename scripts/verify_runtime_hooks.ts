@@ -105,20 +105,18 @@ function main(): number {
     const init = runLoopo(repo, [
       "init",
       "loopo: hook check",
-      "--cwd",
-      repo,
       "--runtime",
       "all",
     ]);
     if (init.status !== 0) fail(init.stderr || init.stdout);
-    const slug = String(parseJson(init.stdout).new_quest.suggested_slug);
+    const wtree = String(parseJson(init.stdout).new_quest.suggested_wtree);
     const create = runLoopo(
       repo,
-      ["quest", "next", "--slug", slug, "--cwd", repo, "--json", "@-"],
+      ["quest", "next", "--wtree", wtree, "--json", "@-"],
       {
         step: "select_quest",
         action: "create_quest",
-        slug,
+        wtree,
         request: "loopo: hook check",
       },
     );
@@ -143,7 +141,7 @@ function main(): number {
     );
 
     const hook = runLoopo(repo, ["hook", "--runtime", "codex"], {
-      cwd: repo,
+      cwd: join(repo, "worktrees", wtree),
       hook_event_name: "Stop",
     });
     if (hook.status !== 0) fail(hook.stderr || hook.stdout);
@@ -163,7 +161,7 @@ function main(): number {
     if (
       "schema_version" in reason ||
       "kind" in reason ||
-      "schema_id" in reason ||
+      "schema_path" in reason ||
       "slug" in reason ||
       "flow_id" in reason ||
       "flow_version" in reason ||
@@ -186,7 +184,7 @@ function main(): number {
       !reason.callback_schema ||
       typeof reason.callback_schema !== "object" ||
       reason.callback_schema.$id !==
-        "https://loopo.dev/schemas/steps/plan-input.v3.json"
+        "schemas/steps/plan-input.v3.json"
     ) {
       fail(`hook quest next output must embed callback schema: ${hook.stdout}`);
     }
@@ -195,7 +193,7 @@ function main(): number {
     }
 
     const duplicate = runLoopo(repo, ["hook", "--runtime", "codex"], {
-      cwd: repo,
+      cwd: join(repo, "worktrees", wtree),
       hook_event_name: "Stop",
     });
     if (duplicate.status !== 0) fail(duplicate.stderr || duplicate.stdout);
@@ -204,7 +202,7 @@ function main(): number {
     }
 
     const copilot = runLoopo(repo, ["hook", "--runtime", "copilot"], {
-      cwd: repo,
+      cwd: join(repo, "worktrees", wtree),
       hook_event_name: "Stop",
     });
     if (copilot.status !== 0) fail(copilot.stderr || copilot.stdout);

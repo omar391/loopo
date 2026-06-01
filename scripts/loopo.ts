@@ -9,7 +9,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   expandHome,
@@ -38,17 +38,13 @@ import {
   ensureCoordinatorWorkspace,
   ensureTaskWorkspace,
   ensureGlobalSkillFiles,
+  ensureGitRootCommit,
   ensureSystemScaffold,
-  ensureStateScaffold,
-  findLatestQuest,
   landingTargetWorktreePath,
-  LOOPO_STATE_FILE,
-  loadState,
   LOOPO_HOOK_STATE_FILE,
   LOOPO_SYSTEM_FILE,
   LOOPO_ROOT_MANIFEST_FILE,
   parseTasksYaml,
-  saveState,
   taskAssignmentBranchRef,
   taskAssignmentChildSlug,
   taskAssignmentWorktreePath,
@@ -68,16 +64,13 @@ import {
   DEFAULT_FLOW_VERSION,
   flowStage,
   flowStep,
-  listBundledFlows,
   loadFlowDefinition,
   type LoadedLoopoFlow,
 } from "./loopo_flow.ts";
 import {
-  V3_STEP_SCHEMAS,
   dereferencedV3Schema,
-  loopoSchemaRef,
   validateV3Input,
-  v3SchemaId,
+  v3SchemaPath,
   v3SchemaRef,
 } from "./loopo_schema.ts";
 import { runLoopoCmdproto } from "./loopo_cmdproto.ts";
@@ -115,13 +108,12 @@ function usage(): void {
   console.log(`loopo
 
 Usage:
-  loopo init "loopo: <request>" --cwd <path> --runtime <codex|gemini|copilot|all> [--flow swe]
-  loopo quest next --slug <slug> --json <json|@file|@->
-  loopo quest help [query]
+  loopo init "loopo: <request>" --runtime <codex|gemini|copilot|all> [--flow swe] [--wtree <name>]
+  loopo quest next --wtree <name> --json <json|@file|@->
   loopo hook --runtime <codex|gemini|copilot>
-  loopo sim "loopo: <request>" [--repo <path>] [--runtime <codex|gemini|copilot>] [--flow <id>]
-  loopo sim --repo <path> --json <json|@file|@->
-  loopo sim hook [--repo <path>] [--runtime <codex|gemini|copilot>] [--json <json|@file|@->]
+  loopo sim init "loopo: <request>" [--runtime <codex|gemini|copilot>] [--flow <id>] [--wtree <name>]
+  loopo sim quest next --wtree <name> --json <json|@file|@->
+  loopo sim hook [--runtime <codex|gemini|copilot>] [--json <json|@file|@->]
   loopo doctor [--repo <path>] [--runtime <codex|gemini|copilot|all>] [--fix]
   loopo cmdproto --help [--json]
   loopo cmdproto execjson <path> <json|@file|@->
@@ -276,8 +268,7 @@ function looksLikeVagueGreenfieldPrompt(prompt: unknown): boolean {
 
 function parseInitArgs(argv: string[]): {
   repo: string;
-  cwd: string;
-  slug: string | null;
+  wtree: string | null;
   flowId: string;
   objective: string;
   force: boolean;
@@ -285,8 +276,7 @@ function parseInitArgs(argv: string[]): {
   skillHome: string | null;
 } {
   let repo: string | null = null;
-  let cwd: string | null = null;
-  let slug: string | null = null;
+  let wtree: string | null = null;
   let flowId = DEFAULT_FLOW_ID;
   let force = false;
   let runtime: DoctorArgs["runtime"] = "all";
@@ -295,10 +285,15 @@ function parseInitArgs(argv: string[]): {
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--repo") repo = argv[++i] ?? repo;
-    else if (arg === "--cwd") cwd = argv[++i] ?? cwd;
-    else if (arg?.startsWith("--cwd=")) cwd = arg.slice("--cwd=".length);
-    else if (arg === "--slug") slug = argv[++i] ?? null;
-    else if (arg?.startsWith("--slug=")) slug = arg.slice("--slug=".length);
+    else if (arg?.startsWith("--repo=")) repo = arg.slice("--repo=".length);
+    else if (arg === "--cwd" || arg?.startsWith("--cwd=")) {
+      throw new Error("loopo init no longer accepts --cwd; run it from the repo root or pass --repo");
+    } else if (arg === "--slug" || arg?.startsWith("--slug=")) {
+      throw new Error("loopo init no longer accepts --slug; use --wtree for an explicit base worktree name");
+    } else if (arg === "--session" || arg?.startsWith("--session=")) {
+      throw new Error("loopo init no longer accepts --session");
+    } else if (arg === "--wtree") wtree = argv[++i] ?? null;
+    else if (arg?.startsWith("--wtree=")) wtree = arg.slice("--wtree=".length);
     else if (arg === "--flow") flowId = argv[++i] ?? flowId;
     else if (arg?.startsWith("--flow=")) flowId = arg.slice("--flow=".length);
     else if (arg === "--force") force = true;
@@ -307,17 +302,17 @@ function parseInitArgs(argv: string[]): {
     else if (arg?.startsWith("--runtime="))
       runtime = arg.slice("--runtime=".length) as DoctorArgs["runtime"];
     else if (arg === "--skill-home") skillHome = argv[++i] ?? null;
+    else if (arg?.startsWith("-")) throw new Error(`unknown init argument: ${arg}`);
     else if (arg !== undefined) objectiveParts.push(arg);
   }
   if (!["codex", "gemini", "copilot", "all"].includes(runtime)) {
     throw new Error("--runtime must be codex, gemini, copilot, or all");
   }
   const objective = objectiveParts.join(" ").trim();
-  const context = resolveRepoContext({ repo, payload: { cwd } });
+  const context = resolveRepoContext({ repo });
   return {
     repo: context.repoRoot,
-    cwd: cwd ? resolve(expandHome(cwd)) : context.repoRoot,
-    slug,
+    wtree,
     flowId: flowId.trim() || DEFAULT_FLOW_ID,
     objective,
     force,
@@ -387,46 +382,6 @@ function resolveAbsoluteGitDir(repoRoot: string): string | null {
   } catch {
     return null;
   }
-}
-
-function recordActiveSessionInGitDir(
-  repoRoot: string,
-  activeSlug: string | null,
-): void {
-  const gitDir = resolveAbsoluteGitDir(repoRoot);
-  if (!gitDir) return;
-  const pointerPath = join(gitDir, "loopo-active-session");
-  if (!activeSlug?.trim()) {
-    rmSync(pointerPath, { force: true });
-  } else {
-    writeText(pointerPath, activeSlug.trim());
-  }
-}
-
-function recordActiveSessionForContext(input: {
-  repoRoot: string;
-  cwd?: string | null;
-  workspacePath?: string | null;
-  activeSlug: string | null;
-}): void {
-  const paths = [
-    input.repoRoot,
-    input.cwd ?? "",
-    input.workspacePath ?? "",
-  ].filter(Boolean);
-  for (const path of [...new Set(paths)]) {
-    recordActiveSessionInGitDir(path, input.activeSlug);
-  }
-}
-
-function getActiveSessionFromGitDir(repoRoot: string): string | null {
-  const gitDir = resolveAbsoluteGitDir(repoRoot);
-  if (!gitDir) return null;
-  const pointerPath = join(gitDir, "loopo-active-session");
-  if (existsSync(pointerPath)) {
-    return readText(pointerPath).trim() || null;
-  }
-  return null;
 }
 
 function installCodexHook(repoRoot: string, cmd: string): string {
@@ -543,7 +498,7 @@ export function runDoctor(argv: string[]): number {
   const wrapperScript = resolve(SCRIPT_DIR, "loopo.ts");
   const globalBin = resolveGlobalLoopoBinPath();
   const repoRoot = args.repo;
-  const expectedFiles = [resolve(repoRoot, LOOPO_STATE_FILE), globalBin];
+  const expectedFiles = [globalBin];
   const rootCheck = existsSync(resolve(repoRoot, LOOPO_ROOT_MANIFEST_FILE))
     ? verifyRootManifest(repoRoot)
     : { ok: false, errors: ["missing root system manifest"] };
@@ -607,7 +562,6 @@ export function runDoctor(argv: string[]): number {
     return 2;
   }
 
-  ensureStateScaffold(repoRoot);
   const systemFiles = ensureSystemScaffold(repoRoot);
   createLoopoShim(globalBin, wrapperScript);
   const buildHookCommand = (runtime: Runtime): string => {
@@ -755,7 +709,7 @@ function v3StepSummary(stage: string, flow = loadFlowDefinition()): string {
 }
 
 function compactCommand(cmd: string, args: string[]): Record<string, unknown> {
-  return { cmd, args, display: [cmd, ...args.map(shellQuote)].join(" ") };
+  return { cmd, args };
 }
 
 function tokenCommand(cmd: string, args: string[]): Record<string, unknown> {
@@ -849,7 +803,7 @@ function rankQuestCandidates(
         if (haystack.has(token)) score += 1;
       }
       return {
-        slug,
+        wtree: slug,
         score,
         description: prompt || slug,
         state: String(quest?.state.stage ?? "unknown"),
@@ -863,10 +817,8 @@ function rankQuestCandidates(
         command: compactCommand("loopo", [
           "quest",
           "next",
-          "--slug",
+          "--wtree",
           slug,
-          "--cwd",
-          String(quest?.state.coordinator_worktree ?? repoRoot),
           "--json",
           "@-",
         ]),
@@ -874,7 +826,7 @@ function rankQuestCandidates(
     })
     .sort((left, right) => {
       const score = Number(right.score ?? 0) - Number(left.score ?? 0);
-      return score || String(left.slug).localeCompare(String(right.slug));
+      return score || String(left.wtree).localeCompare(String(right.wtree));
     });
 }
 
@@ -882,10 +834,24 @@ function suggestedSlug(request: string): string {
   return slugify(request.replace(/^loopo:\s*/i, "") || "quest");
 }
 
-function setActiveSlug(repoRoot: string, slug: string | null): void {
-  const state = loadState(repoRoot);
-  state.active_quest_slug = slug;
-  saveState(repoRoot, state);
+function validWtreeName(value: string): boolean {
+  const text = value.trim();
+  return (
+    text.length > 0 &&
+    text === basename(text) &&
+    text !== "." &&
+    text !== ".." &&
+    !text.includes("/") &&
+    !text.includes("\\")
+  );
+}
+
+function requireWtreeName(value: string, label = "wtree"): string {
+  const text = value.trim();
+  if (!validWtreeName(text)) {
+    throw new Error(`${label} must be a base worktree name`);
+  }
+  return text;
 }
 
 function ensureV3Runtime(input: {
@@ -893,7 +859,6 @@ function ensureV3Runtime(input: {
   runtime: DoctorArgs["runtime"];
   skillHome?: string | null;
 }): void {
-  ensureStateScaffold(input.repoRoot);
   ensureSystemScaffold(input.repoRoot);
   ensureGlobalSkillFiles(input.skillHome);
   const wrapperScript = resolve(SCRIPT_DIR, "loopo.ts");
@@ -915,47 +880,44 @@ function ensureV3Runtime(input: {
 
 function v3InitRoute(input: {
   repoRoot: string;
-  cwd: string;
   runtime: DoctorArgs["runtime"];
   request: string;
   flowId: string;
-  slug?: string | null;
+  wtree?: string | null;
 }): Record<string, unknown> {
-  const slug = String(input.slug ?? "").trim() || suggestedSlug(input.request);
+  const wtree = requireWtreeName(
+    String(input.wtree ?? "").trim() || suggestedSlug(input.request),
+  );
   const flow = loadFlowDefinition(input.flowId);
   const createQuestInput = {
     step: "select_quest",
     action: "create_quest",
-    slug,
+    wtree,
     flow_id: flow.id,
     request: input.request,
   };
   return {
     schema_version: 3,
     kind: "init_route",
-    schema_id: v3SchemaId("init-output"),
+    schema_path: v3SchemaPath("init-output"),
     request: input.request,
-    cwd: input.cwd,
     runtime: input.runtime,
     flow_id: flow.id,
     flow_version: flow.version,
     candidates: rankQuestCandidates(input.repoRoot, input.request),
     new_quest: {
-      suggested_slug: slug,
+      suggested_wtree: wtree,
       command: compactCommand("loopo", [
         "quest",
         "next",
-        "--slug",
-        slug,
-        "--cwd",
-        input.cwd,
+        "--wtree",
+        wtree,
         "--json",
         JSON.stringify(createQuestInput),
       ]),
       callback_schema: embeddedCallbackSchema("next-input"),
       input: createQuestInput,
     },
-    help: compactCommand("loopo", ["quest", "help"]),
   };
 }
 
@@ -1010,18 +972,16 @@ function acquireSlugLock(repoRoot: string, slug: string): SlugLock {
         response: {
           schema_version: 3,
           kind: "lock_error",
-          schema_id: v3SchemaId("lock-error"),
-          slug,
+          schema_path: v3SchemaPath("lock-error"),
+          wtree: slug,
           lock: {
             path,
             pid,
             retry: compactCommand("loopo", [
               "quest",
               "next",
-              "--slug",
+              "--wtree",
               slug,
-              "--cwd",
-              repoRoot,
               "--json",
               "@-",
             ]),
@@ -1035,8 +995,8 @@ function acquireSlugLock(repoRoot: string, slug: string): SlugLock {
     response: {
       schema_version: 3,
       kind: "lock_error",
-      schema_id: v3SchemaId("lock-error"),
-      slug,
+      schema_path: v3SchemaPath("lock-error"),
+      wtree: slug,
       lock: { path, pid: null, retry: "stale lock could not be reaped" },
     },
   };
@@ -1085,10 +1045,8 @@ function readyChildrenForV3(
         init: command("loopo", [
           "init",
           request,
-          "--slug",
+          "--wtree",
           childSlug,
-          "--cwd",
-          workspace.worktree_path || repoRoot,
           "--runtime",
           runtime,
           "--flow",
@@ -1097,10 +1055,8 @@ function readyChildrenForV3(
         next: command("loopo", [
           "quest",
           "next",
-          "--slug",
+          "--wtree",
           childSlug,
-          "--cwd",
-          workspace.worktree_path || repoRoot,
           "--json",
           "@-",
         ]),
@@ -1155,16 +1111,11 @@ function v3StepOutput(input: {
   const stepDef = flowStep(flow, stage);
   const step = stepDef.id;
   const schema = outputSchemaForStage(stage, flow);
-  const questCwd =
-    String(input.state.coordinator_worktree ?? "").trim() ||
-    String(input.state.context_root ?? input.repoRoot);
   const nextArgs = [
     "quest",
     "next",
-    "--slug",
+    "--wtree",
     input.files.slug,
-    "--cwd",
-    questCwd,
     "--json",
     "@-",
   ];
@@ -1198,8 +1149,8 @@ function v3StepOutput(input: {
   const output: Record<string, unknown> = {
     schema_version: 3,
     kind: "quest_step",
-    schema_id: v3SchemaId(schema),
-    slug: input.files.slug,
+    schema_path: v3SchemaPath(schema),
+    wtree: input.files.slug,
     flow_id: flow.id,
     flow_version: flow.version,
     step,
@@ -1218,7 +1169,6 @@ function v3StepOutput(input: {
     };
     output.commands = {
       next: compactCommand("loopo", nextArgs),
-      help: compactCommand("loopo", ["quest", "help"]),
     };
     output.docs = {
       state_yaml: input.files.tasks,
@@ -1267,7 +1217,7 @@ function v3Error(
   return {
     schema_version: 3,
     kind: "error",
-    schema_id: v3SchemaId("error-output"),
+    schema_path: v3SchemaPath("error-output"),
     error: message,
     ...extra,
   };
@@ -1838,7 +1788,6 @@ function handleSystemUpdate(input: {
 
 function handleLanding(input: {
   repoRoot: string;
-  cwd: string;
   files: QuestFiles;
   payload: Record<string, any>;
   requestId: string;
@@ -1885,7 +1834,7 @@ function handleLanding(input: {
     const trackedWorktreePaths = runCommand(
       "git",
       ["ls-files", "--", "worktrees"],
-      { cwd: input.cwd, timeoutMs: 15_000 },
+      { cwd: input.repoRoot, timeoutMs: 15_000 },
     );
     if (trackedWorktreePaths.status === 0) {
       const leakedPaths = trackedWorktreePaths.stdout
@@ -2091,18 +2040,14 @@ function shouldHookContinue(input: {
 
 function parseQuestRepoArg(argv: string[]): {
   repo: string | null;
-  session: string | null;
-  slug: string | null;
-  cwd: string | null;
+  wtree: string | null;
   runtime: Runtime | null;
   json: string | null;
   full: boolean;
   rest: string[];
 } {
   let repo: string | null = null;
-  let session: string | null = null;
-  let slug: string | null = null;
-  let cwd: string | null = null;
+  let wtree: string | null = null;
   let runtime: Runtime | null = null;
   let json: string | null = null;
   let full = false;
@@ -2111,31 +2056,34 @@ function parseQuestRepoArg(argv: string[]): {
     const arg = argv[i];
     if (arg === "--repo") repo = argv[++i] ?? null;
     else if (arg?.startsWith("--repo=")) repo = arg.slice("--repo=".length);
-    else if (arg === "--cwd") cwd = argv[++i] ?? null;
-    else if (arg?.startsWith("--cwd=")) cwd = arg.slice("--cwd=".length);
+    else if (arg === "--cwd" || arg?.startsWith("--cwd=")) {
+      throw new Error("loopo no longer accepts --cwd; use --wtree and run from a repo/worktree context");
+    } else if (arg === "--slug" || arg?.startsWith("--slug=")) {
+      throw new Error("loopo no longer accepts --slug; use --wtree");
+    } else if (arg === "--session" || arg?.startsWith("--session=")) {
+      throw new Error("loopo no longer accepts --session; use --wtree");
+    } else if (arg === "--wtree") wtree = argv[++i] ?? null;
+    else if (arg?.startsWith("--wtree=")) wtree = arg.slice("--wtree=".length);
     else if (arg === "--runtime") runtime = (argv[++i] as Runtime) ?? null;
     else if (arg?.startsWith("--runtime="))
       runtime = arg.slice("--runtime=".length) as Runtime;
-    else if (arg === "--session") session = argv[++i] ?? null;
-    else if (arg === "--slug") slug = argv[++i] ?? null;
-    else if (arg?.startsWith("--slug=")) slug = arg.slice("--slug=".length);
     else if (arg === "--json") json = argv[++i] ?? "@-";
     else if (arg?.startsWith("--json=")) json = arg.slice("--json=".length);
     else if (arg === "--full") full = true;
     else rest.push(arg);
   }
-  return { repo, session, slug, cwd, runtime, json, full, rest };
+  return { repo, wtree, runtime, json, full, rest };
 }
 
 function createV3Quest(input: {
   repoRoot: string;
-  cwd: string;
   slug: string;
   request: string;
   resolutionSource: string;
   flowId: string;
 }): { files: QuestFiles; state: Partial<{ [key: string]: any }> } {
   ensureSystemScaffold(input.repoRoot);
+  ensureGitRootCommit(input.repoRoot);
   const flow = loadFlowDefinition(input.flowId);
   const workspace = ensureCoordinatorWorkspace(input.repoRoot, input.slug);
   const parentAssignment = isChildExecutionQuestPrompt(input.request)
@@ -2159,14 +2107,91 @@ function createV3Quest(input: {
     landingTargetBranch,
     landingTargetWorktree,
   });
-  setActiveSlug(input.repoRoot, input.slug);
-  recordActiveSessionForContext({
-    repoRoot: input.repoRoot,
-    cwd: input.cwd,
-    workspacePath: workspace.worktree_path,
-    activeSlug: input.slug,
-  });
   return { files, state };
+}
+
+type HookWtreeResolution =
+  | { ok: true; wtree: string; source: string; cwd: string }
+  | { ok: false; reason: string; cwd: string };
+
+function stringField(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function wtreeFromPathUnderWorktrees(
+  repoRoot: string,
+  cwd: string,
+): string | null {
+  const worktreesRoot = resolve(repoRoot, "worktrees");
+  const resolvedCwd = resolve(expandHome(cwd));
+  const pathRelative = relative(worktreesRoot, resolvedCwd);
+  if (!pathRelative || pathRelative.startsWith("..") || isAbsolute(pathRelative)) {
+    return null;
+  }
+  const candidate = pathRelative.split(/[\\/]/)[0] ?? "";
+  return validWtreeName(candidate) ? candidate : null;
+}
+
+function deriveHookWtreeFromCwd(repoRoot: string, cwd: string): {
+  wtree: string | null;
+  reason: string | null;
+} {
+  const direct = wtreeFromPathUnderWorktrees(repoRoot, cwd);
+  const gitTop = gitRootFrom(resolve(expandHome(cwd)));
+  const gitDerived = gitTop ? wtreeFromPathUnderWorktrees(repoRoot, gitTop) : null;
+  if (direct && gitDerived && direct !== gitDerived) {
+    return { wtree: null, reason: "hook cwd and git worktree signals conflict" };
+  }
+  return { wtree: direct ?? gitDerived, reason: null };
+}
+
+function questExistsForWtree(repoRoot: string, wtree: string): boolean {
+  return validWtreeName(wtree) && existsSync(questFiles(repoRoot, wtree).tasks);
+}
+
+function resolveHookWtree(input: {
+  repoRoot: string;
+  explicitWtree?: string | null;
+  payload: Record<string, any>;
+  contextPayload: Record<string, any>;
+  processCwd?: string;
+}): HookWtreeResolution {
+  const cwd =
+    stringField(input.contextPayload.cwd) ||
+    stringField(input.payload.cwd) ||
+    resolve(input.processCwd ?? process.cwd());
+  const explicit =
+    stringField(input.explicitWtree) ||
+    stringField(input.payload.wtree) ||
+    stringField(input.payload.loopo_wtree);
+  if (explicit && !validWtreeName(explicit)) {
+    return { ok: false, reason: "explicit wtree is not a base name", cwd };
+  }
+
+  const derived = deriveHookWtreeFromCwd(input.repoRoot, cwd);
+  if (derived.reason) return { ok: false, reason: derived.reason, cwd };
+  const cwdWtree = derived.wtree;
+  if (explicit && cwdWtree && explicit !== cwdWtree) {
+    return {
+      ok: false,
+      reason: "explicit wtree and hook cwd resolve to different quests",
+      cwd,
+    };
+  }
+
+  const selected = explicit || cwdWtree;
+  if (!selected) {
+    return { ok: false, reason: "hook did not resolve a worktree", cwd };
+  }
+  if (!questExistsForWtree(input.repoRoot, selected)) {
+    return { ok: false, reason: "hook worktree has no quest state", cwd };
+  }
+  return {
+    ok: true,
+    wtree: selected,
+    source: explicit ? "explicit" : "cwd",
+    cwd,
+  };
 }
 
 export function runQuestNextV3(argv: string[]): number {
@@ -2174,12 +2199,19 @@ export function runQuestNextV3(argv: string[]): number {
   const payload = readJsonArg(args.json);
   const context = resolveRepoContext({
     repo: args.repo,
-    payload: { ...payload, cwd: args.cwd },
-    cwd: args.cwd,
+    payload,
   });
-  const slug = String(args.slug ?? payload.slug ?? "").trim();
-  if (!slug) {
-    questResponse(v3Error("quest next requires --slug"));
+  let slug: string;
+  try {
+    slug = requireWtreeName(String(args.wtree ?? payload.wtree ?? "").trim());
+  } catch (error) {
+    questResponse(
+      v3Error(
+        error instanceof Error
+          ? error.message
+          : "quest next requires --wtree <base-worktree-name>",
+      ),
+    );
     return 1;
   }
   const lock = acquireSlugLock(context.repoRoot, slug);
@@ -2194,7 +2226,7 @@ export function runQuestNextV3(argv: string[]): number {
       if (stepError) {
         questResponse(
           v3Error("quest does not exist; create it with select_quest input", {
-            slug,
+            wtree: slug,
             expected_callback_schema: embeddedCallbackSchema("next-input"),
           }),
         );
@@ -2204,7 +2236,7 @@ export function runQuestNextV3(argv: string[]): number {
       if (schemaErrors.length) {
         questResponse(
           v3Error("callback schema validation failed", {
-            slug,
+            wtree: slug,
             schema: v3SchemaRef("next-input"),
             errors: schemaErrors,
           }),
@@ -2213,23 +2245,22 @@ export function runQuestNextV3(argv: string[]): number {
       }
       if (String(payload.action ?? "") !== "create_quest") {
         questResponse(
-          v3Error("select_quest action must be create_quest", { slug }),
+          v3Error("select_quest action must be create_quest", { wtree: slug }),
         );
         return 1;
       }
-      if (payload.slug && String(payload.slug) !== slug) {
-        questResponse(v3Error("payload slug does not match --slug", { slug }));
+      if (payload.wtree && String(payload.wtree) !== slug) {
+        questResponse(v3Error("payload wtree does not match --wtree", { wtree: slug }));
         return 1;
       }
       const request = String(payload.request ?? "").trim();
       if (!request) {
-        questResponse(v3Error("create_quest requires request", { slug }));
+        questResponse(v3Error("create_quest requires request", { wtree: slug }));
         return 1;
       }
       const flowId = String(payload.flow_id ?? DEFAULT_FLOW_ID).trim();
       const created = createV3Quest({
         repoRoot: context.repoRoot,
-        cwd: args.cwd ? resolve(expandHome(args.cwd)) : context.repoRoot,
         slug,
         request,
         resolutionSource: context.source,
@@ -2249,8 +2280,8 @@ export function runQuestNextV3(argv: string[]): number {
     const rootManifest = verifyRootManifest(context.repoRoot);
     if (!rootManifest.ok) {
       questResponse(
-        v3Error("root manifest verification failed", {
-          errors: rootManifest.errors,
+          v3Error("root manifest verification failed", {
+            errors: rootManifest.errors,
         }),
       );
       return 2;
@@ -2259,7 +2290,7 @@ export function runQuestNextV3(argv: string[]): number {
     if (!manifestCheck.ok) {
       questResponse(
         v3Error("quest manifest verification failed", {
-          slug,
+          wtree: slug,
           errors: manifestCheck.errors,
         }),
       );
@@ -2274,13 +2305,13 @@ export function runQuestNextV3(argv: string[]): number {
       const expected = stageInputStep(currentStage, flow);
       const stepError = assertStep(payload, expected);
       if (stepError) {
-        questResponse(v3Error(stepError, { slug, state: state.stage }));
+        questResponse(v3Error(stepError, { wtree: slug, state: state.stage }));
         return 1;
       }
       const schemaName = inputSchemaForStage(currentStage, flow);
       if (!schemaName) {
         questResponse(
-          v3Error("current step does not accept a callback payload", { slug }),
+          v3Error("current step does not accept a callback payload", { wtree: slug }),
         );
         return 1;
       }
@@ -2288,7 +2319,7 @@ export function runQuestNextV3(argv: string[]): number {
       if (schemaErrors.length) {
         questResponse(
           v3Error("callback schema validation failed", {
-            slug,
+            wtree: slug,
             state: state.stage,
             schema: v3SchemaRef(schemaName),
             errors: schemaErrors,
@@ -2349,7 +2380,6 @@ export function runQuestNextV3(argv: string[]): number {
         } else if (expected === "landing") {
           state = handleLanding({
             repoRoot: context.repoRoot,
-            cwd: args.cwd ? resolve(expandHome(args.cwd)) : context.repoRoot,
             files: existing.files,
             payload,
             requestId,
@@ -2358,7 +2388,7 @@ export function runQuestNextV3(argv: string[]): number {
       } catch (error) {
         questResponse(
           v3Error(error instanceof Error ? error.message : String(error), {
-            slug,
+            wtree: slug,
             state: state.stage,
           }),
         );
@@ -2366,13 +2396,6 @@ export function runQuestNextV3(argv: string[]): number {
       }
     }
 
-    setActiveSlug(context.repoRoot, slug);
-    recordActiveSessionForContext({
-      repoRoot: context.repoRoot,
-      cwd: args.cwd ? resolve(expandHome(args.cwd)) : context.repoRoot,
-      workspacePath: String(state.coordinator_worktree ?? ""),
-      activeSlug: slug,
-    });
     const refreshed = parseTasksYaml(readText(existing.files.tasks));
     questResponse(
       v3StepOutput({
@@ -2388,110 +2411,6 @@ export function runQuestNextV3(argv: string[]): number {
   }
 }
 
-export function runQuestHelpV3(argv: string[]): number {
-  const args = parseQuestRepoArg(argv);
-  if (args.json !== null) {
-    questResponse(
-      v3Error("quest help no longer accepts --json; run loopo quest help", {
-        schema: v3SchemaRef("help-output"),
-      }),
-    );
-    return 1;
-  }
-  const requested = args.rest[0] || null;
-  const yamlSchemas = ["flow.v1", "step-definition.v1"]
-    .filter((name) => {
-      if (!requested) return true;
-      return String(name).includes(requested);
-    })
-    .map((name) => ({
-      name,
-      ...loopoSchemaRef(name),
-    }));
-  const stepSchemas = V3_STEP_SCHEMAS.filter((name) => {
-    if (!requested) return true;
-    return String(name).includes(requested);
-  }).map((name) => ({
-    name,
-    ...v3SchemaRef(name),
-  }));
-  const schemas = [...yamlSchemas, ...stepSchemas];
-  const commands = {
-    init: compactCommand("loopo", [
-      "init",
-      "loopo: <request>",
-      "--cwd",
-      "<cwd>",
-      "--runtime",
-      "<codex|gemini|copilot|all>",
-      "--flow",
-      "swe",
-    ]),
-    next: compactCommand("loopo", [
-      "quest",
-      "next",
-      "--slug",
-      "<slug>",
-      "--cwd",
-      "<cwd>",
-      "--json",
-      "@-",
-    ]),
-    help: compactCommand("loopo", ["quest", "help"]),
-    hook: compactCommand("loopo", ["hook", "--runtime", "codex"]),
-  };
-  questResponse({
-    schema_version: 3,
-    kind: "help",
-    schema_id: v3SchemaId("help-output"),
-    step: "help",
-    state: "help",
-    summary:
-      "Read the runtime manual, then continue with init, quest next, or hook.",
-    guide: {
-      purpose:
-        "Loopo V3 is a bin-owned quest workflow. Treat this help output as the runtime skill manual and follow the commands returned by each step.",
-      launcher:
-        'For a user prompt that begins with loopo:, run loopo init "loopo: <request>" --cwd <cwd> --runtime <runtime>.',
-      rules: [
-        "Never edit .loopo/** directly.",
-        "Use the callback_schema from the current step output to shape the next JSON payload.",
-        "Submit all quest mutations through commands.next with --json @-.",
-        "Runtime hook configs can infer cwd from the current working directory.",
-        "Generated hook files only need loopo hook --runtime <runtime>.",
-        "When executing children, launch the child init command shown in children[].commands.init in a dedicated child CLI agent session, then submit a child_result to the parent only after that child quest finishes.",
-      ],
-      commands: [
-        {
-          name: "init",
-          command:
-            'loopo init "loopo: <request>" --cwd <cwd> --runtime <codex|gemini|copilot|all>',
-          use: "Start or resume routing for a user loopo request. Inspect candidates and new_quest, then submit the returned select_quest input through quest next.",
-        },
-        {
-          name: "quest next",
-          command: "loopo quest next --slug <slug> --cwd <cwd> --json @-",
-          use: "Advance exactly one lifecycle step by sending JSON that matches the returned callback_schema. Follow the new step output after every call.",
-        },
-        {
-          name: "quest help",
-          command: "loopo quest help",
-          use: "Read this runtime manual and schema catalog when unsure how to continue a quest.",
-        },
-        {
-          name: "hook",
-          command: "loopo hook --runtime codex",
-          use: "Runtime hook files can infer cwd from the current working directory, so the hook command stays compact.",
-        },
-      ],
-    },
-    schemas,
-    flows: listBundledFlows(),
-    commands,
-  });
-  return 0;
-}
-
 export function runHook(argv: string[]): number {
   const args = parseQuestRepoArg(argv);
   const raw = readHookJsonArg(args.json);
@@ -2501,7 +2420,6 @@ export function runHook(argv: string[]): number {
     ...(envelopeLike ? raw.context : {}),
     ...(envelopeLike ? raw.metadata : {}),
     ...payload,
-    cwd: args.cwd ?? payload.cwd,
   };
   const runtime = String(
     args.runtime ??
@@ -2509,33 +2427,32 @@ export function runHook(argv: string[]): number {
       (envelopeLike ? raw.context?.runtime : null) ??
       "codex",
   ) as Runtime;
-  const sessionCwd = resolveCwd(contextPayload);
-  const context = resolveRepoContext({
-    repo: args.repo,
-    payload: contextPayload,
-    cwd: sessionCwd,
-  });
-  const state = loadState(context.repoRoot);
-  const payloadSlug = String(payload.slug ?? "").trim();
-  const activeSlug =
-    args.slug ||
-    payloadSlug ||
-    getActiveSessionFromGitDir(sessionCwd) ||
-    getActiveSessionFromGitDir(context.repoRoot) ||
-    state.active_quest_slug;
-  const activeQuest =
-    activeSlug && existsSync(questFiles(context.repoRoot, activeSlug).tasks)
-      ? {
-          files: questFiles(context.repoRoot, activeSlug),
-          state: parseTasksYaml(
-            readText(questFiles(context.repoRoot, activeSlug).tasks),
-          ),
-        }
-      : findLatestQuest(context.repoRoot);
-  if (!activeQuest) {
+  let context: { repoRoot: string; source: string };
+  try {
+    const hookCwd = resolveCwd(contextPayload);
+    context = resolveRepoContext({
+      repo: args.repo,
+      payload: contextPayload,
+      cwd: hookCwd,
+    });
+  } catch {
     process.stdout.write("{}");
     return 0;
   }
+  const resolved = resolveHookWtree({
+    repoRoot: context.repoRoot,
+    explicitWtree: args.wtree,
+    payload,
+    contextPayload,
+  });
+  if (!resolved.ok) {
+    process.stdout.write("{}");
+    return 0;
+  }
+  const activeQuest = {
+    files: questFiles(context.repoRoot, resolved.wtree),
+    state: parseTasksYaml(readText(questFiles(context.repoRoot, resolved.wtree).tasks)),
+  };
   const manifestCheck = verifyQuestManifest(activeQuest.files);
   if (!manifestCheck.ok) {
     process.stdout.write("{}");
@@ -2611,11 +2528,11 @@ export function runHook(argv: string[]): number {
   const budgetReason = JSON.stringify({
     loopo: true,
     command: "quest.next",
-    slug: activeQuest.files.slug,
+    wtree: activeQuest.files.slug,
     step: stageToV3Step(stage, loadStateFlow(activeQuest.state)),
     stop_reason: "budget_exhausted",
     summary:
-      "Continuation budget exhausted. Resume manually with loopo quest next --slug <slug> --json @-.",
+      "Continuation budget exhausted. Resume manually with loopo quest next --wtree <name> --json @-.",
   });
   if (budgetExhausted) chain.budget_prompted = true;
   else chain.continuation_count = budgetUsed + 1;
@@ -2650,7 +2567,6 @@ function runQuest(argv: string[]): number {
   const subcommand = argv[0];
   const rest = argv.slice(1);
   if (subcommand === "next") return runQuestNextV3(rest);
-  if (subcommand === "help") return runQuestHelpV3(rest);
   usage();
   return 1;
 }
@@ -2666,11 +2582,10 @@ export function runInit(argv: string[]): number {
     questResponse(
       v3InitRoute({
         repoRoot: args.repo,
-        cwd: args.cwd,
         runtime: args.runtime,
         request: args.objective,
         flowId: args.flowId,
-        slug: args.slug,
+        wtree: args.wtree,
       }),
     );
     return 0;

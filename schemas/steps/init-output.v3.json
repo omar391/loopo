@@ -1,30 +1,27 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://loopo.dev/schemas/steps/init-output.v3.json",
+  "$id": "schemas/steps/init-output.v3.json",
   "title": "Loopo V3 Init Route Output",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema_version",
     "kind",
-    "schema_id",
+    "schema_path",
     "request",
-    "cwd",
     "runtime",
     "flow_id",
     "flow_version",
     "candidates",
-    "new_quest",
-    "help"
+    "new_quest"
   ],
   "properties": {
     "schema_version": { "const": 3 },
     "kind": { "const": "init_route" },
-    "schema_id": {
-      "const": "https://loopo.dev/schemas/steps/init-output.v3.json"
+    "schema_path": {
+      "const": "schemas/steps/init-output.v3.json"
     },
     "request": { "type": "string" },
-    "cwd": { "type": "string" },
     "runtime": { "type": "string" },
     "flow_id": { "type": "string" },
     "flow_version": { "type": "integer" },
@@ -34,7 +31,7 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "slug",
+          "wtree",
           "score",
           "description",
           "state",
@@ -45,7 +42,7 @@
           "command"
         ],
         "properties": {
-          "slug": { "type": "string" },
+          "wtree": { "type": "string" },
           "score": { "type": "number" },
           "description": { "type": "string" },
           "state": { "type": "string" },
@@ -54,7 +51,7 @@
           "flow_version": { "type": "integer" },
           "worktree_path": { "type": "string" },
           "command": {
-            "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/command"
+            "$ref": "common.v3.json#/$defs/command"
           }
         }
       }
@@ -62,31 +59,28 @@
     "new_quest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["suggested_slug", "command", "callback_schema", "input"],
+      "required": ["suggested_wtree", "command", "callback_schema", "input"],
       "properties": {
-        "suggested_slug": { "type": "string" },
+        "suggested_wtree": { "type": "string" },
         "command": {
-          "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/command"
+          "$ref": "common.v3.json#/$defs/command"
         },
         "callback_schema": {
-          "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/embedded_schema"
+          "$ref": "common.v3.json#/$defs/embedded_schema"
         },
         "input": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["step", "action", "slug", "flow_id", "request"],
+          "required": ["step", "action", "wtree", "flow_id", "request"],
           "properties": {
             "step": { "const": "select_quest" },
             "action": { "const": "create_quest" },
-            "slug": { "type": "string" },
+            "wtree": { "type": "string" },
             "flow_id": { "type": "string" },
             "request": { "type": "string" }
           }
         }
       }
-    },
-    "help": {
-      "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/command"
     }
   }
 }

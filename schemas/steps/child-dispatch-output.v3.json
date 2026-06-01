@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://loopo.dev/schemas/steps/child-dispatch-output.v3.json",
+  "$id": "schemas/steps/child-dispatch-output.v3.json",
   "title": "Loopo V3 Child Dispatch Output",
   "type": "object",
   "additionalProperties": false,
@@ -8,10 +8,10 @@
   "properties": {
     "schema_version": { "const": 3 },
     "kind": { "const": "quest_step" },
-    "schema_id": {
-      "const": "https://loopo.dev/schemas/steps/child-dispatch-output.v3.json"
+    "schema_path": {
+      "const": "schemas/steps/child-dispatch-output.v3.json"
     },
-    "slug": { "type": "string" },
+    "wtree": { "type": "string" },
     "quest_id": { "type": "string" },
     "flow_id": { "type": "string" },
     "flow_version": { "type": "integer" },
@@ -21,7 +21,7 @@
         {
           "allOf": [
             {
-              "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/compact_step"
+              "$ref": "common.v3.json#/$defs/compact_step"
             },
             {
               "type": "object",
@@ -36,24 +36,24 @@
     "state": { "type": "string" },
     "summary": { "type": "string" },
     "callback_schema": {
-      "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/embedded_schema"
+      "$ref": "common.v3.json#/$defs/embedded_schema"
     },
     "allowed_transitions": {
-      "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/transitions"
+      "$ref": "common.v3.json#/$defs/transitions"
     },
     "context": {
-      "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/step_context"
+      "$ref": "common.v3.json#/$defs/step_context"
     },
     "commands": {
-      "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/step_commands"
+      "$ref": "common.v3.json#/$defs/step_commands"
     },
     "docs": {
-      "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/docs"
+      "$ref": "common.v3.json#/$defs/docs"
     },
     "children": {
       "type": "array",
       "items": {
-        "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/child"
+        "$ref": "common.v3.json#/$defs/child"
       }
     }
   }

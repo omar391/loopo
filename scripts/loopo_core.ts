@@ -946,7 +946,6 @@ export function questFiles(repoRoot: string, slug: string): QuestFiles {
 
 type SystemDocDef = {
   id: string;
-  type: string;
   file: string;
   schema: string;
 };
@@ -954,31 +953,26 @@ type SystemDocDef = {
 export const SYSTEM_DOCS: SystemDocDef[] = [
   {
     id: "high-level-design",
-    type: "high-level-design",
     file: "high-level-design.yaml",
     schema: "system-high-level-design.v1.json",
   },
   {
     id: "low-level-design",
-    type: "low-level-design",
     file: "low-level-design.yaml",
     schema: "system-low-level-design.v1.json",
   },
   {
     id: "architecture",
-    type: "architecture",
     file: "architecture.yaml",
     schema: "system-architecture.v1.json",
   },
   {
     id: "system-behaviours",
-    type: "system-behaviours",
     file: "system-behaviours.yaml",
     schema: "system-behaviours.v1.json",
   },
   {
     id: "design-system",
-    type: "design-system",
     file: "design-system.yaml",
     schema: "system-design-system.v1.json",
   },
@@ -999,9 +993,7 @@ export function renderSystemDocYaml(doc: SystemDocDef): string {
   return [
     "schema_version: 1",
     `id: ${yamlScalar(doc.id)}`,
-    `type: ${yamlScalar(doc.type)}`,
     `title: ${yamlScalar(title)}`,
-    "status: draft",
     "sections: []",
     "updated_at: null",
     "",
@@ -1013,14 +1005,9 @@ export function renderSystemIndexYaml(repoRoot: string): string {
   for (const doc of SYSTEM_DOCS) {
     const path = systemDocPath(repoRoot, doc.file);
     lines.push(`  - id: ${yamlScalar(doc.id)}`);
-    lines.push(`    type: ${yamlScalar(doc.type)}`);
     lines.push(`    path: ${yamlScalar(`.loopo/docs/${doc.file}`)}`);
-    lines.push(
-      `    schema_id: ${yamlScalar(`https://loopo.dev/schemas/${doc.schema}`)}`,
-    );
+    lines.push(`    schema_path: ${yamlScalar(`schemas/${doc.schema}`)}`);
     lines.push(`    digest: ${yamlScalar(hashText(readText(path)))}`);
-    lines.push("    status: draft");
-    lines.push(`    updated_at: ${yamlScalar("managed")}`);
   }
   return `${lines.join("\n")}\n`;
 }
@@ -1207,9 +1194,7 @@ function renderUpdatedSystemDocYaml(
   return [
     "schema_version: 1",
     `id: ${yamlScalar(doc.id)}`,
-    `type: ${yamlScalar(doc.type)}`,
     `title: ${yamlScalar(title)}`,
-    "status: active",
     ...renderSystemUpdateSections(updates),
     `updated_at: ${yamlScalar(nowIso())}`,
     "",
@@ -1266,10 +1251,10 @@ export function renderMinimalSkillMd(): string {
     "",
     "Package source lives in `/Volumes/Projects/business/AstronLab/omar391/loopo`.",
     "",
-    'When user prompt is `loopo: {request}`, invoke `loopo init "{request}" --cwd <cwd> --runtime <runtime>` and follow the instructions from output.',
+    'When user prompt is `loopo: {request}`, invoke `loopo init "{request}" --runtime <runtime>` from the repo root and follow the instructions from output.',
     "",
     "```bash",
-    'loopo init "loopo: build the app" --cwd "$PWD" --runtime codex',
+    'loopo init "loopo: build the app" --runtime codex',
     "```",
     "",
   ].join("\n");
@@ -2041,6 +2026,16 @@ function hasGitCommit(repoRoot: string): boolean {
       timeoutMs: 10_000,
     }).status === 0
   );
+}
+
+export function ensureGitRootCommit(repoRoot: string): void {
+  if (hasGitCommit(repoRoot)) return;
+  const init = runCommand("git", ["init", repoRoot], {
+    timeoutMs: 15_000,
+  });
+  if (init.status !== 0) {
+    throw new Error(init.stderr || init.stdout || `failed to init git repo at ${repoRoot}`);
+  }
 }
 
 function parseGitWorktrees(repoRoot: string): Array<{

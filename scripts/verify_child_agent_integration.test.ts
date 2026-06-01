@@ -89,7 +89,7 @@ function createFixture(prefix: string): Fixture {
 
 function next(
   fixture: Fixture,
-  slug: string,
+  wtree: string,
   payload: Record<string, unknown>,
 ): Record<string, unknown> {
   const proc = runLoopo(
@@ -97,10 +97,8 @@ function next(
     [
       "quest",
       "next",
-      "--slug",
-      slug,
-      "--cwd",
-      fixture.repo,
+      "--wtree",
+      wtree,
       "--json",
       "@-",
       "--full",
@@ -114,11 +112,11 @@ function next(
 
 function compactCurrent(
   fixture: Fixture,
-  slug: string,
+  wtree: string,
 ): Record<string, unknown> {
   const proc = runLoopo(
     fixture.repo,
-    ["quest", "next", "--slug", slug, "--cwd", fixture.repo, "--json", "@-"],
+    ["quest", "next", "--wtree", wtree, "--json", "@-"],
     {},
     fixture.env,
   );
@@ -127,7 +125,7 @@ function compactCurrent(
 }
 
 describe("loopo v3 child slug integration", () => {
-  it("documents the v3 command flow in quest help", () => {
+  it("documents the v3 command flow in public usage", () => {
     const fixture = createFixture("loopo-v3-help-");
     try {
       const usage = runLoopo(fixture.repo, [], undefined, fixture.env);
@@ -136,7 +134,7 @@ describe("loopo v3 child slug integration", () => {
         .split("\n")
         .filter((line) => line.trim().startsWith("loopo init "));
       expect(publicInitLines).toEqual([
-        '  loopo init "loopo: <request>" --cwd <path> --runtime <codex|gemini|copilot|all> [--flow swe]',
+        '  loopo init "loopo: <request>" --runtime <codex|gemini|copilot|all> [--flow swe] [--wtree <name>]',
       ]);
       const publicHookLines = usage.stdout
         .split("\n")
@@ -144,49 +142,22 @@ describe("loopo v3 child slug integration", () => {
       expect(publicHookLines).toEqual([
         "  loopo hook --runtime <codex|gemini|copilot>",
       ]);
+      expect(usage.stdout).toContain("loopo quest next --wtree <name>");
+      expect(usage.stdout).toContain("loopo sim init");
+      expect(usage.stdout).toContain("loopo sim quest next");
+      expect(usage.stdout).toContain("loopo sim hook");
+      expect(usage.stdout).not.toContain("quest help");
+      expect(usage.stdout).not.toContain("sim quest help");
       expect(usage.stdout).not.toContain("loopo spec");
 
-      const help = runLoopo(
+      const removedHelp = runLoopo(
         fixture.repo,
         ["quest", "help"],
         undefined,
         fixture.env,
       );
-      expect(help.status, help.stderr || help.stdout).toBe(0);
-      const helpJson = parseJson(help.stdout);
-      expectValidSchema(helpJson, "help-output");
-      expect(helpJson.step).toBe("help");
-      expect(helpJson.state).toBe("help");
-      expect(Object.keys(helpJson.commands)).toEqual([
-        "init",
-        "next",
-        "help",
-        "hook",
-      ]);
-      expect(helpJson.commands.hook.cmd).toBe("loopo");
-      expect(helpJson.commands.hook.args).toEqual([
-        "hook",
-        "--runtime",
-        "codex",
-      ]);
-      expect(helpJson.commands.init.args).toContain("--flow");
-      expect(helpJson.flows.map((flow: any) => flow.id)).toContain("swe");
-      expect(helpJson.schemas.map((schema: any) => schema.name)).toContain(
-        "flow.v1",
-      );
-      expect(helpJson.schemas.map((schema: any) => schema.name)).toContain(
-        "step-definition.v1",
-      );
-      expect(helpJson.guide.launcher).toContain("loopo init");
-      expect(helpJson.guide.rules).toContain(
-        "Generated hook files only need loopo hook --runtime <runtime>.",
-      );
-      expect(helpJson.guide.commands.map((entry: any) => entry.name)).toEqual([
-        "init",
-        "quest next",
-        "quest help",
-        "hook",
-      ]);
+      expect(removedHelp.status).toBe(1);
+      expect(removedHelp.stdout).toContain("Usage:");
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }
@@ -202,8 +173,6 @@ describe("loopo v3 child slug integration", () => {
         [
           "init",
           "loopo: build calculator",
-          "--cwd",
-          fixture.repo,
           "--runtime",
           "codex",
         ],
@@ -215,10 +184,10 @@ describe("loopo v3 child slug integration", () => {
       expectValidSchema(route, "init-output");
       expect(route.kind).toBe("init_route");
       expect(route.flow_id).toBe("swe");
-      expect(route.schema_id).toBe(
-        "https://loopo.dev/schemas/steps/init-output.v3.json",
+      expect(route.schema_path).toBe(
+        "schemas/steps/init-output.v3.json",
       );
-      const slug = String(route.new_quest.suggested_slug);
+      const slug = String(route.new_quest.suggested_wtree);
       expect((route.new_quest.command.args as string[])).not.toContain("@-");
       expect((route.new_quest.command.args as string[])).toEqual(
         expect.arrayContaining([
@@ -226,7 +195,7 @@ describe("loopo v3 child slug integration", () => {
           JSON.stringify({
             step: "select_quest",
             action: "create_quest",
-            slug,
+            wtree: slug,
             flow_id: "swe",
             request: "loopo: build calculator",
           }),
@@ -236,7 +205,7 @@ describe("loopo v3 child slug integration", () => {
       const created = next(fixture, slug, {
         step: "select_quest",
         action: "create_quest",
-        slug,
+        wtree: slug,
         request: "loopo: build calculator",
       });
       expectValidSchema(created, "step-output");
@@ -248,7 +217,7 @@ describe("loopo v3 child slug integration", () => {
         handler: "plan",
         input_step: "plan",
         callback_schema: {
-          $id: "https://loopo.dev/schemas/steps/plan-input.v3.json",
+          $id: "schemas/steps/plan-input.v3.json",
           type: "object",
         },
         output_schema: "step-output",
@@ -291,7 +260,7 @@ describe("loopo v3 child slug integration", () => {
       >;
       expect(compactCallbackSchema).toMatchObject({
         $schema: "https://json-schema.org/draft/2020-12/schema",
-        $id: "https://loopo.dev/schemas/steps/plan-input.v3.json",
+        $id: "schemas/steps/plan-input.v3.json",
         type: "object",
       });
       expect(compactCallbackSchema.required).toEqual(
@@ -312,7 +281,7 @@ describe("loopo v3 child slug integration", () => {
       expectNoSchemaRefs(compactCallbackSchema);
       expect(compact).not.toHaveProperty("schema_version");
       expect(compact).not.toHaveProperty("kind");
-      expect(compact).not.toHaveProperty("schema_id");
+      expect(compact).not.toHaveProperty("schema_path");
       expect(compact).not.toHaveProperty("input_schema");
       expect(compact).not.toHaveProperty("slug");
       expect(compact).not.toHaveProperty("flow_id");
@@ -333,10 +302,8 @@ describe("loopo v3 child slug integration", () => {
         [
           "quest",
           "next",
-          "--slug",
+          "--wtree",
           slug,
-          "--cwd",
-          fixture.repo,
           "--json",
           "@-",
         ],
@@ -362,10 +329,8 @@ describe("loopo v3 child slug integration", () => {
         [
           "quest",
           "next",
-          "--slug",
+          "--wtree",
           slug,
-          "--cwd",
-          fixture.repo,
           "--json",
           "@-",
         ],
@@ -392,8 +357,6 @@ describe("loopo v3 child slug integration", () => {
         [
           "init",
           "loopo: create a fullstack app",
-          "--cwd",
-          fixture.repo,
           "--runtime",
           "codex",
         ],
@@ -402,11 +365,11 @@ describe("loopo v3 child slug integration", () => {
       );
       expect(vagueInit.status, vagueInit.stderr || vagueInit.stdout).toBe(0);
       const vagueRoute = parseJson(vagueInit.stdout);
-      const vagueSlug = String(vagueRoute.new_quest.suggested_slug);
+      const vagueSlug = String(vagueRoute.new_quest.suggested_wtree);
       const vagueCreated = next(fixture, vagueSlug, {
         step: "select_quest",
         action: "create_quest",
-        slug: vagueSlug,
+        wtree: vagueSlug,
         request: "loopo: create a fullstack app",
       });
       expectValidSchema(vagueCreated, "step-output");
@@ -417,10 +380,8 @@ describe("loopo v3 child slug integration", () => {
         [
           "quest",
           "next",
-          "--slug",
+          "--wtree",
           vagueSlug,
-          "--cwd",
-          fixture.repo,
           "--json",
           "@-",
         ],
@@ -456,8 +417,6 @@ describe("loopo v3 child slug integration", () => {
         [
           "init",
           "loopo: build a task tracker",
-          "--cwd",
-          fixture.repo,
           "--runtime",
           "codex",
         ],
@@ -466,11 +425,11 @@ describe("loopo v3 child slug integration", () => {
       );
       expect(serialInit.status, serialInit.stderr || serialInit.stdout).toBe(0);
       const serialRoute = parseJson(serialInit.stdout);
-      const serialSlug = String(serialRoute.new_quest.suggested_slug);
+      const serialSlug = String(serialRoute.new_quest.suggested_wtree);
       const serialCreated = next(fixture, serialSlug, {
         step: "select_quest",
         action: "create_quest",
-        slug: serialSlug,
+        wtree: serialSlug,
         request: "loopo: build a task tracker",
       });
       expectValidSchema(serialCreated, "step-output");
@@ -585,10 +544,8 @@ describe("loopo v3 child slug integration", () => {
         [
           "quest",
           "next",
-          "--slug",
+          "--wtree",
           slug,
-          "--cwd",
-          fixture.repo,
           "--json",
           "@-",
         ],
@@ -630,10 +587,10 @@ describe("loopo v3 child slug integration", () => {
         any
       >;
       expect(systemUpdateSchema).toMatchObject({
-        $id: "https://loopo.dev/schemas/steps/system-update-input.v3.json",
+        $id: "schemas/steps/system-update-input.v3.json",
       });
       expect(systemUpdateSchema.properties?.system_update).toMatchObject({
-        $id: "https://loopo.dev/schemas/system-update.v1.json",
+        $id: "schemas/system-update.v1.json",
         required: ["schema_version", "updates"],
       });
       expectNoSchemaRefs(systemUpdateSchema);
@@ -643,10 +600,8 @@ describe("loopo v3 child slug integration", () => {
         [
           "quest",
           "next",
-          "--slug",
+          "--wtree",
           slug,
-          "--cwd",
-          fixture.repo,
           "--json",
           "@-",
         ],
@@ -685,10 +640,8 @@ describe("loopo v3 child slug integration", () => {
         [
           "quest",
           "next",
-          "--slug",
+          "--wtree",
           slug,
-          "--cwd",
-          fixture.repo,
           "--json",
           "@-",
         ],
@@ -728,8 +681,6 @@ describe("loopo v3 child slug integration", () => {
         [
           "init",
           "loopo: a fullstack app",
-          "--cwd",
-          fixture.repo,
           "--runtime",
           "codex",
         ],
@@ -738,18 +689,18 @@ describe("loopo v3 child slug integration", () => {
       );
       expect(init.status, init.stderr || init.stdout).toBe(0);
       const route = parseJson(init.stdout);
-      const slug = String(route.new_quest.suggested_slug);
+      const slug = String(route.new_quest.suggested_wtree);
 
       const created = next(fixture, slug, {
         step: "select_quest",
         action: "create_quest",
-        slug,
+        wtree: slug,
         request: "loopo: a fullstack app",
       });
       expectValidSchema(created, "step-output");
       expect(created.step).toBe("plan");
       expect(((created.commands as any).next as any).args).toEqual(
-        expect.arrayContaining(["--cwd", join(fixture.repo, "worktrees", slug)]),
+        expect.arrayContaining(["--wtree", slug]),
       );
 
       const awaitingAnswers = next(fixture, slug, {
@@ -835,10 +786,8 @@ describe("loopo v3 child slug integration", () => {
         [
           "init",
           "loopo: execute child task build-mvp-task-tracker: Build the MVP full-stack task tracker application",
-          "--slug",
+          "--wtree",
           "a-fullstack-app-build-mvp-task-tracker",
-          "--cwd",
-          fixture.repo,
           "--runtime",
           "codex",
         ],
@@ -850,7 +799,7 @@ describe("loopo v3 child slug integration", () => {
       const created = next(fixture, "a-fullstack-app-build-mvp-task-tracker", {
         step: "select_quest",
         action: "create_quest",
-        slug: "a-fullstack-app-build-mvp-task-tracker",
+        wtree: "a-fullstack-app-build-mvp-task-tracker",
         request:
           "loopo: execute child task build-mvp-task-tracker: Build the MVP full-stack task tracker application",
       });
@@ -858,12 +807,8 @@ describe("loopo v3 child slug integration", () => {
       expect(created.step).toBe("plan");
       expect(((created.commands as any).next as any).args).toEqual(
         expect.arrayContaining([
-          "--cwd",
-          join(
-            fixture.repo,
-            "worktrees",
-            "a-fullstack-app-build-mvp-task-tracker",
-          ),
+          "--wtree",
+          "a-fullstack-app-build-mvp-task-tracker",
         ]),
       );
 
@@ -945,8 +890,6 @@ describe("loopo v3 child slug integration", () => {
         [
           "init",
           "loopo: build lifecycle tester",
-          "--cwd",
-          fixture.repo,
           "--runtime",
           "codex",
         ],
@@ -955,12 +898,12 @@ describe("loopo v3 child slug integration", () => {
       );
       expect(init.status, init.stderr || init.stdout).toBe(0);
       const route = parseJson(init.stdout);
-      const slug = String(route.new_quest.suggested_slug);
+      const slug = String(route.new_quest.suggested_wtree);
 
       const created = next(fixture, slug, {
         step: "select_quest",
         action: "create_quest",
-        slug,
+        wtree: slug,
         request: "loopo: build lifecycle tester",
       });
       expectValidSchema(created, "step-output");
@@ -1092,7 +1035,7 @@ describe("loopo v3 child slug integration", () => {
       expect(children.map((child) => child.task_id)).toEqual(["t001", "t002"]);
       expect(children[0].commands.init.args).toEqual(
         expect.arrayContaining([
-          "--slug",
+          "--wtree",
           `${slug}-t001`,
           "--runtime",
           "codex",
@@ -1102,7 +1045,7 @@ describe("loopo v3 child slug integration", () => {
       );
       expect(children[1].commands.init.args).toEqual(
         expect.arrayContaining([
-          "--slug",
+          "--wtree",
           `${slug}-t002`,
           "--runtime",
           "codex",
@@ -1216,8 +1159,6 @@ describe("loopo v3 child slug integration", () => {
         [
           "init",
           "loopo: build guarded child flow",
-          "--cwd",
-          fixture.repo,
           "--runtime",
           "codex",
         ],
@@ -1226,12 +1167,12 @@ describe("loopo v3 child slug integration", () => {
       );
       expect(init.status, init.stderr || init.stdout).toBe(0);
       const route = parseJson(init.stdout);
-      const slug = String(route.new_quest.suggested_slug);
+      const slug = String(route.new_quest.suggested_wtree);
 
       next(fixture, slug, {
         step: "select_quest",
         action: "create_quest",
-        slug,
+        wtree: slug,
         request: "loopo: build guarded child flow",
       });
 
@@ -1268,7 +1209,7 @@ describe("loopo v3 child slug integration", () => {
       );
       expect(childInit.status, childInit.stderr || childInit.stdout).toBe(0);
       const childRoute = parseJson(childInit.stdout);
-      expect(String(childRoute.new_quest.suggested_slug)).toBe(child.child_slug);
+      expect(String(childRoute.new_quest.suggested_wtree)).toBe(child.child_slug);
       expect(child.commands.init.args).toEqual(
         expect.arrayContaining(["--runtime", "codex"]),
       );
@@ -1280,10 +1221,8 @@ describe("loopo v3 child slug integration", () => {
         [
           "quest",
           "next",
-          "--slug",
+          "--wtree",
           slug,
-          "--cwd",
-          fixture.repo,
           "--json",
           "@-",
         ],
@@ -1314,8 +1253,6 @@ describe("loopo v3 child slug integration", () => {
         [
           "init",
           "loopo: build landing guard",
-          "--cwd",
-          fixture.repo,
           "--runtime",
           "codex",
         ],
@@ -1324,12 +1261,12 @@ describe("loopo v3 child slug integration", () => {
       );
       expect(init.status, init.stderr || init.stdout).toBe(0);
       const route = parseJson(init.stdout);
-      const slug = String(route.new_quest.suggested_slug);
+      const slug = String(route.new_quest.suggested_wtree);
 
       next(fixture, slug, {
         step: "select_quest",
         action: "create_quest",
-        slug,
+        wtree: slug,
         request: "loopo: build landing guard",
       });
 
@@ -1398,10 +1335,8 @@ describe("loopo v3 child slug integration", () => {
         [
           "quest",
           "next",
-          "--slug",
+          "--wtree",
           slug,
-          "--cwd",
-          fixture.repo,
           "--json",
           "@-",
         ],
@@ -1431,8 +1366,6 @@ describe("loopo v3 child slug integration", () => {
         [
           "init",
           "loopo: build landed workflow",
-          "--cwd",
-          fixture.repo,
           "--runtime",
           "codex",
         ],
@@ -1441,12 +1374,12 @@ describe("loopo v3 child slug integration", () => {
       );
       expect(init.status, init.stderr || init.stdout).toBe(0);
       const route = parseJson(init.stdout);
-      const slug = String(route.new_quest.suggested_slug);
+      const slug = String(route.new_quest.suggested_wtree);
 
       next(fixture, slug, {
         step: "select_quest",
         action: "create_quest",
-        slug,
+        wtree: slug,
         request: "loopo: build landed workflow",
       });
 
@@ -1509,7 +1442,7 @@ describe("loopo v3 child slug integration", () => {
         );
         expect(childInit.status, childInit.stderr || childInit.stdout).toBe(0);
         const childRoute = parseJson(childInit.stdout);
-        const childSlug = String(childRoute.new_quest.suggested_slug);
+        const childSlug = String(childRoute.new_quest.suggested_wtree);
         expect(childSlug).toBe(String(child.child_slug));
 
         next(fixture, childSlug, childRoute.new_quest.input);

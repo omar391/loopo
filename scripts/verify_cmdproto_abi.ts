@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createLoopoShim } from "./loopo_core.ts";
 import { runCommand } from "./loopo_utils.ts";
-import { validateSchemaId, v3SchemaId } from "./loopo_schema.ts";
+import { validateSchemaPath, v3SchemaPath } from "./loopo_schema.ts";
 import { DEFAULT_RUNTIME_REQUEST } from "./runtime_supervisor.ts";
 import { scenarioPayloadForStep } from "./sim_product_quest_scenarios.ts";
 
@@ -38,10 +38,10 @@ function parseJson(text: string): Record<string, any> {
   }
 }
 
-function expectSchema(payload: Record<string, any>, schemaId: string): void {
-  const errors = validateSchemaId(payload, schemaId);
+function expectSchema(payload: Record<string, any>, schemaPath: string): void {
+  const errors = validateSchemaPath(payload, schemaPath);
   if (errors.length) {
-    fail(`${schemaId} validation failed: ${errors.join("; ")}`);
+    fail(`${schemaPath} validation failed: ${errors.join("; ")}`);
   }
 }
 
@@ -95,6 +95,18 @@ function createFixture(prefix: string): Fixture {
   return { root, repo, env };
 }
 
+function prepareExistingGitRepoFixture(
+  repo: string,
+  env: Record<string, string>,
+): void {
+  const initGit = runCommand("git", ["init", repo], { timeoutMs: 15_000 });
+  if (initGit.status !== 0) fail(initGit.stderr || initGit.stdout);
+  runGit(repo, ["config", "user.email", "loopo-sim@example.invalid"], env);
+  runGit(repo, ["config", "user.name", "Loopo Sim Fixture"], env);
+  runGit(repo, ["checkout", "-B", "main"], env);
+  runGit(repo, ["commit", "--allow-empty", "-m", "sim fixture"], env);
+}
+
 function main(): number {
   const help = runLoopo(
     process.cwd(),
@@ -111,9 +123,10 @@ function main(): number {
     "doctor",
     "hook",
     "init",
-    "quest help",
     "quest next",
-    "sim",
+    "sim hook",
+    "sim init",
+    "sim quest next",
   ];
   if (JSON.stringify(commandPaths.sort()) !== JSON.stringify(expectedPaths.sort())) {
     fail(
@@ -161,26 +174,23 @@ function main(): number {
       fail(`loopo shim without args must print usage; got ${JSON.stringify(shimUsage.stdout)}`);
     }
 
-    const directHelp = runLoopo(
-      fixture.repo,
-      ["quest", "help"],
-      undefined,
-      fixture.env,
-    );
-    if (directHelp.status !== 0) fail(directHelp.stderr || directHelp.stdout);
-    const directHelpJson = parseJson(directHelp.stdout);
-    expectSchema(directHelpJson, v3SchemaId("help-output"));
-
-    const abiHelp = runLoopo(
+    const removedHelp = runLoopo(
       fixture.repo,
       ["cmdproto", "execjson", "quest", "help", "{}"],
       undefined,
       fixture.env,
     );
-    if (abiHelp.status !== 0) fail(abiHelp.stderr || abiHelp.stdout);
-    const abiHelpJson = parseJson(abiHelp.stdout);
-    if (JSON.stringify(abiHelpJson) !== JSON.stringify(directHelpJson)) {
-      fail("cmdproto quest help must return the direct help JSON payload");
+    if (removedHelp.status === 0) {
+      fail("cmdproto quest help must be removed");
+    }
+    const removedSimHelp = runLoopo(
+      fixture.repo,
+      ["cmdproto", "execjson", "sim", "quest", "help", "{}"],
+      undefined,
+      fixture.env,
+    );
+    if (removedSimHelp.status === 0) {
+      fail("cmdproto sim quest help must be removed");
     }
 
     const init = runLoopo(
@@ -191,7 +201,7 @@ function main(): number {
         "init",
         JSON.stringify({
           request: "loopo: build the app",
-          cwd: fixture.repo,
+          repo: fixture.repo,
           runtime: "codex",
           flow: "swe",
         }),
@@ -201,12 +211,12 @@ function main(): number {
     );
     if (init.status !== 0) fail(init.stderr || init.stdout);
     const route = parseJson(init.stdout);
-    expectSchema(route as Record<string, any>, v3SchemaId("init-output"));
+    expectSchema(route as Record<string, any>, v3SchemaPath("init-output"));
 
     const newQuest = route.new_quest as Record<string, any> | undefined;
     if (!newQuest || typeof newQuest !== "object") fail("init route missing new_quest");
-    const slug = String(newQuest.suggested_slug ?? "");
-    if (!slug) fail("init route missing suggested_slug");
+    const wtree = String(newQuest.suggested_wtree ?? "");
+    if (!wtree) fail("init route missing suggested_wtree");
     const nextPayload = newQuest.input as Record<string, unknown> | undefined;
     if (!nextPayload || typeof nextPayload !== "object") {
       fail("init route missing next input payload");
@@ -220,8 +230,8 @@ function main(): number {
         "quest",
         "next",
         JSON.stringify({
-          slug,
-          cwd: fixture.repo,
+          wtree,
+          repo: fixture.repo,
           payload: nextPayload,
         }),
       ],
@@ -230,20 +240,22 @@ function main(): number {
     );
     if (next.status !== 0) fail(next.stderr || next.stdout);
     const step = parseJson(next.stdout);
-    expectSchema(step as Record<string, any>, v3SchemaId("step-output"));
+    expectSchema(step as Record<string, any>, v3SchemaPath("step-output"));
 
-    const questDir = join(fixture.repo, ".loopo", "quests", slug);
+    const questDir = join(fixture.repo, ".loopo", "quests", wtree);
     if (!existsSync(join(questDir, "tasks.yaml"))) {
       fail("cmdproto quest next must still create the canonical quest state");
     }
 
     const simRepo = join(fixture.root, "sim-repo");
+    prepareExistingGitRepoFixture(simRepo, fixture.env);
     const simStart = runLoopo(
       fixture.repo,
       [
         "cmdproto",
         "execjson",
         "sim",
+        "init",
         JSON.stringify({
           request: DEFAULT_RUNTIME_REQUEST,
           repo: simRepo,
@@ -262,7 +274,15 @@ function main(): number {
     const simCommandArgs = simStarted.commands?.next?.args;
     if (
       JSON.stringify(simCommandArgs) !==
-      JSON.stringify(["sim", "--repo", simRepo, "--json", "@-"])
+      JSON.stringify([
+        "sim",
+        "quest",
+        "next",
+        "--wtree",
+        simStarted.wtree,
+        "--json",
+        "@-",
+      ])
     ) {
       fail(`cmdproto sim must return guided sim continuation command: ${simStart.stdout}`);
     }
@@ -280,8 +300,11 @@ function main(): number {
         "cmdproto",
         "execjson",
         "sim",
+        "quest",
+        "next",
         JSON.stringify({
           repo: simRepo,
+          wtree: simStarted.wtree,
           payload: simPlanPayload,
         }),
       ],

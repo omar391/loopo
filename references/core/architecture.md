@@ -6,19 +6,18 @@ supervision lessons in one place.
 
 ## Launcher And Command Surface
 
-- Loopo is a deterministic V3 workflow launcher for slug-based quest flows.
+- Loopo is a deterministic V3 workflow launcher for worktree-based quest flows.
 - User-facing work enters through:
 
 ```bash
-loopo init "{request}" --cwd <cwd> --runtime <runtime>
+loopo init "{request}" --runtime <runtime>
 ```
 
 - The launcher returns compact JSON step output with schema-backed next actions.
-- Quest identity is the slug; session ids are not part of the user contract.
-- `loopo quest next --slug <slug> --json <json|@file|@->` is the only
+- Quest identity in the public command surface is `wtree`, the base worktree
+  name. Session ids are not part of the user contract.
+- `loopo quest next --wtree <name> --json <json|@file|@->` is the only
   state-mutating quest command after init.
-- `loopo quest help` exposes command metadata, flows, schemas, and guide
-  text.
 - `loopo hook --runtime <runtime>` reads hook payload JSON from stdin and
   decides runtime continuation.
 - `loopo doctor --fix` repairs system scaffolding, hook installation, shims,
@@ -43,8 +42,7 @@ loopo init "{request}" --cwd <cwd> --runtime <runtime>
   `.loopo/quests/{slug}/plan.yaml`, JSONL sidecars,
   `.loopo/quests/{slug}/children/*.yaml`, and
   `.loopo/quests/{slug}/manifest.sign.json`
-- Runtime state: `.loopo/state.json`, `.loopo/hook-state.json`, and
-  `.loopo/hook-events.jsonl`
+- Runtime state: `.loopo/hook-state.json` and `.loopo/hook-events.jsonl`
 - `tasks.yaml` is authoritative for root quest stage and task state.
 - `plan.yaml` is authoritative for the current plan.
 - `.loopo/system.yaml` indexes every supported system doc and schema.
@@ -121,9 +119,9 @@ planning -> awaiting_user_answers -> plan_review -> task_graph_ready -> validati
 
 - Hooks cover Codex CLI, Codex Desktop, Gemini CLI, Copilot CLI, and Copilot in
   VS Code.
-- Active quest selection checks explicit `--slug`, hook payload slug, git-dir
-  active-session pointers for the session cwd or repo root, `.loopo/state.json`,
-  then the most recently modified quest.
+- Hook quest selection uses an explicit `--wtree`, payload `wtree`,
+  payload `loopo_wtree`, or a cwd inside `<repo>/worktrees/<name>`. Repo-root
+  hooks and missing, ambiguous, invalid, or conflicting selector signals no-op.
 - Archived quests under `.loopo/archieve/{slug}` use the historical directory
   spelling and are inactive; they must not trigger continuation.
 - Decision source priority:
@@ -143,17 +141,16 @@ planning -> awaiting_user_answers -> plan_review -> task_graph_ready -> validati
 
 - Before any continuation decision, hash all managed quest files: `tasks.yaml`,
   `plan.yaml`, JSONL sidecars, child files, root system docs, and manifests.
-- Compare managed file hashes against the latest stored hashes in
-  `.loopo/state.json`.
+- Compare managed file hashes against the current manifest receipts.
 - On mismatch, mark `managed_file_drift`, emit no continuation, and use
   `loopo doctor --fix` as the recovery path.
 - Ignore only exact same-state duplicate end-events for
-  `(runtime, hook_event_name, context_root, active_quest_slug, iteration, snapshot_fingerprint)`.
+  `(runtime, hook_event_name, context_root, wtree, iteration, snapshot_fingerprint)`.
 - Keep suppressing duplicates while the snapshot is unchanged, even if events
   are delayed.
 - Do not suppress later events once the snapshot has advanced.
 - Limit each automatic continuation chain to 12 non-terminal hook-triggered
-  turns per `(runtime, context_root, active_quest_slug)` chain.
+  turns per `(runtime, context_root, wtree)` chain.
 - When budget is reached, emit one final continuation prompt directing terminal
   handoff append with `stop_reason: budget_exhausted`.
 - The next end-event sees terminal handoff and emits no continuation.
@@ -175,10 +172,10 @@ Use these commands when installing, repairing, or live-testing lifecycle and
 hook behavior:
 
 ```bash
-bun index.ts init "loopo: build" --cwd /path/to/repo --runtime all
-bun index.ts quest next --slug build --json @request.json
+bun index.ts init "loopo: build" --runtime all
+bun index.ts quest next --wtree build --json @request.json
 bun index.ts hook --runtime codex
-bun index.ts sim "loopo: build me a python app" --runtime codex --flow swe
+bun index.ts sim init "loopo: build me a python app" --repo /path/to/repo --runtime codex --flow swe
 bun index.ts doctor --fix
 bun scripts/setup_runtime_hooks.ts --repo /path/to/repo --runtime all --hook-script /abs/path/to/scripts/loopo_sim.ts
 ```

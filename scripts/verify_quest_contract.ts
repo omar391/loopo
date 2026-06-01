@@ -56,25 +56,21 @@ function main(): number {
     const init = runLoopo(repo, [
       "init",
       "loopo: verify deterministic v3",
-      "--cwd",
-      repo,
       "--runtime",
       "codex",
     ]);
     if (init.status !== 0) fail(init.stderr || init.stdout);
     const route = parseJson(init.stdout);
     if (route.kind !== "init_route") fail(`bad init output: ${init.stdout}`);
-    const slug = String(route.new_quest.suggested_slug);
+    const wtree = String(route.new_quest.suggested_wtree);
 
     const create = runLoopo(
       repo,
       [
         "quest",
         "next",
-        "--slug",
-        slug,
-        "--cwd",
-        repo,
+        "--wtree",
+        wtree,
         "--json",
         "@-",
         "--full",
@@ -82,7 +78,7 @@ function main(): number {
       {
         step: "select_quest",
         action: "create_quest",
-        slug,
+        wtree,
         request: "loopo: verify deterministic v3",
       },
     );
@@ -94,7 +90,7 @@ function main(): number {
       fail(`v3 output leaked v2 fields: ${create.stdout}`);
     }
 
-    const questDir = join(repo, ".loopo", "quests", slug);
+    const questDir = join(repo, ".loopo", "quests", wtree);
     for (const name of [
       "tasks.yaml",
       "plan.yaml",
@@ -117,41 +113,17 @@ function main(): number {
       fail("tasks.yaml must not persist public session_id");
     }
 
-    const help = runLoopo(repo, ["quest", "help"]);
-    if (help.status !== 0) fail(help.stderr || help.stdout);
-    const helpJson = parseJson(help.stdout);
-    if (!Array.isArray(helpJson.schemas) || helpJson.schemas.length < 10) {
-      fail(`help must list v3 step schemas: ${help.stdout}`);
+    const removedHelp = runLoopo(repo, ["quest", "help"]);
+    if (removedHelp.status === 0) {
+      fail("quest help must be removed from the public command surface");
     }
-    if (helpJson.step !== "help" || helpJson.state !== "help") {
-      fail(`help must return step-like guidance JSON: ${help.stdout}`);
-    }
-    if (!helpJson.commands?.hook || !helpJson.commands?.next) {
-      fail(`help must include step command catalog: ${help.stdout}`);
-    }
-    if (!helpJson.guide?.launcher?.includes("loopo init")) {
-      fail(`help must include v3 launcher documentation: ${help.stdout}`);
-    }
-    if (
-      !Array.isArray(helpJson.guide.commands) ||
-      !helpJson.guide.commands.some(
-        (entry: any) => entry.name === "quest next",
-      ) ||
-      !helpJson.guide.commands.some((entry: any) => entry.name === "hook")
-    ) {
-      fail(`help must document quest next and hook workflows: ${help.stdout}`);
-    }
-    if (
-      !helpJson.guide?.rules?.includes(
-        "Generated hook files only need loopo hook --runtime <runtime>.",
-      )
-    ) {
-      fail(`help must describe compact hook files: ${help.stdout}`);
+    if (!removedHelp.stdout.includes("Usage:")) {
+      fail(`removed quest help must print usage: ${removedHelp.stdout}`);
     }
 
     const bad = runLoopo(
       repo,
-      ["quest", "next", "--slug", slug, "--cwd", repo, "--json", "@-"],
+      ["quest", "next", "--wtree", wtree, "--json", "@-"],
       { step: "child_result" },
     );
     if (bad.status === 0) fail("wrong-step input must fail");
@@ -162,7 +134,7 @@ function main(): number {
     );
     const tampered = runLoopo(
       repo,
-      ["quest", "next", "--slug", slug, "--cwd", repo, "--json", "@-"],
+      ["quest", "next", "--wtree", wtree, "--json", "@-"],
       {},
     );
     if (tampered.status === 0) fail("tampered YAML must block continuation");

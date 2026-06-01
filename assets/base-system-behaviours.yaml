@@ -60,9 +60,8 @@ behaviours:
 
   - id: v3-command-surface
     statement: >-
-      The public Loopo command surface is init, doctor, quest next, quest
-      help, hook, and sim; quest state only advances through schema-valid V3
-      payloads.
+      The public Loopo command surface is init, doctor, quest next, hook, and
+      sim; quest state only advances through schema-valid V3 payloads.
     test_refs:
       - scripts/verify_child_agent_integration.test.ts
       - scripts/verify_coherency.ts
@@ -71,10 +70,10 @@ behaviours:
 
   - id: public-usage-surface
     statement: >-
-      CLI usage exposes init, quest next, quest help, hook, doctor, and sim
-      entrypoints for direct public operation; cmdproto mirrors that same
-      command set through loopo cmdproto execjson as a transparent wrapper
-      without replacing the direct CLI or V3 payload authority.
+      CLI usage exposes init, quest next, hook, doctor, and sim entrypoints for
+      direct public operation; cmdproto mirrors that same command set through
+      loopo cmdproto execjson as a transparent wrapper without replacing the
+      direct CLI or V3 payload authority.
     test_refs:
       - scripts/verify_child_agent_integration.test.ts
       - scripts/verify_coherency.ts
@@ -124,8 +123,8 @@ behaviours:
   - id: quest-candidate-ranking
     statement: >-
       Init candidate ranking tokenizes the incoming request and existing quest
-      slugs/prompts, ignores short tokens and loopo, scores token overlap, and
-      sorts by descending score then slug.
+      wtree names/prompts, ignores short tokens and loopo, scores token
+      overlap, and sorts by descending score then wtree name.
     test_refs:
       - scripts/verify_child_agent_integration.test.ts
     source_refs:
@@ -133,8 +132,8 @@ behaviours:
 
   - id: quest-creation-gate
     statement: >-
-      A missing quest slug can only be created by a select_quest payload whose
-      action is create_quest, whose slug matches --slug, and whose request is
+      A missing quest wtree can only be created by a select_quest payload whose
+      action is create_quest, whose wtree matches --wtree, and whose request is
       non-empty; otherwise loopo emits a V3 error.
     test_refs:
       - scripts/verify_child_agent_integration.test.ts
@@ -147,7 +146,8 @@ behaviours:
     statement: >-
       Creating a quest writes tasks.yaml, plan.yaml, JSONL sidecars,
       children/, an initial quest_started handoff, a quest manifest, a
-      coordinator workspace, active slug state, and active-session pointers.
+      coordinator workspace, and runtime hook scaffolding without active quest
+      pointers.
     test_refs:
       - scripts/verify_child_agent_integration.test.ts
       - scripts/verify_quest_contract.ts
@@ -263,7 +263,7 @@ behaviours:
     statement: >-
       Quest step output is compact by default and includes slug, flow id,
       flow version, state, current step context, next command, transitions, and
-      a note to request --full; --full adds schema ids, schemas, docs, help,
+      a note to request --full; --full adds schema paths, schemas, docs, help,
       summaries, and allowed transitions.
     test_refs:
       - scripts/verify_child_agent_integration.test.ts
@@ -596,11 +596,11 @@ behaviours:
       - scripts/loopo_utils.ts
       - scripts/loopo_core.ts
 
-  - id: active-session-resolution
+  - id: explicit-wtree-resolution
     statement: >-
-      After creation and every quest next response, Loopo stores the active slug
-      in .loopo/state.json and writes git-dir loopo-active-session pointers for
-      the repo root, command cwd, and coordinator workspace when available.
+      Quest continuation requires an explicit base worktree selector from
+      --wtree or payload wtree; Loopo does not use active-session pointers or
+      .loopo/state.json for continuation.
     test_refs:
       - scripts/verify_child_agent_integration.test.ts
       - scripts/verify_runtime_hooks.ts
@@ -609,10 +609,10 @@ behaviours:
 
   - id: hook-active-quest-selection
     statement: >-
-      Runtime hooks resolve the active quest from --slug, payload slug,
-      git-dir active-session pointers for the session cwd or repo root,
-      .loopo/state.json, or the most recently modified quest; when no active
-      quest exists the hook emits an empty JSON object.
+      Runtime hooks resolve the active quest from --wtree, payload wtree,
+      payload loopo_wtree, or a cwd inside the selected repo's worktrees
+      directory; repo-root, missing, invalid, ambiguous, or conflicting hook
+      context emits an empty JSON object.
     test_refs:
       - scripts/verify_runtime_hooks.ts
     source_refs:
@@ -690,7 +690,7 @@ behaviours:
 
   - id: doctor-health-check
     statement: >-
-      loopo doctor checks for .loopo/state.json, the global loopo shim, a valid
+      loopo doctor checks for the global loopo shim, a valid
       root system manifest, and runtime hook configs; without --fix it reports
       healthy or issues and exits nonzero when repair is needed.
     test_refs:
@@ -700,7 +700,7 @@ behaviours:
 
   - id: doctor-fix
     statement: >-
-      loopo doctor --fix ensures state and system scaffolding, creates the
+      loopo doctor --fix ensures system scaffolding, creates the
       global loopo shim, installs requested runtime hooks, and reports every
       written system or hook file.
     test_refs:
@@ -724,8 +724,8 @@ behaviours:
   - id: hook-command-portability
     statement: >-
       Generated runtime hook commands are compact loopo hook commands that infer
-      cwd from the runtime process instead of embedding --cwd or --repo paths,
-      and doctor flags older node -e, .loopo/bin/loopo, --cwd, or --repo hook
+      cwd from the runtime process instead of embedding repo paths, and doctor
+      flags older node -e, .loopo/bin/loopo, --cwd, or --repo hook
       commands as stale.
     test_refs:
       - scripts/verify_runtime_hooks.ts
@@ -745,14 +745,4 @@ behaviours:
     source_refs:
       - scripts/loopo_core.ts
 
-  - id: quest-help-contract
-    statement: >-
-      loopo quest help returns schema-valid help output with command metadata,
-      available flows, schemas, guide text, and V3 launcher rules, including
-      child execution guidance.
-    test_refs:
-      - scripts/verify_child_agent_integration.test.ts
-    source_refs:
-      - scripts/loopo.ts
-      - schemas/steps/help-output.v3.json
 pending_proposals: []

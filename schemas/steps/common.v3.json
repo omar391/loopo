@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://loopo.dev/schemas/steps/common.v3.json",
+  "$id": "schemas/steps/common.v3.json",
   "title": "Loopo V3 Step Schema Common Definitions",
   "$defs": {
     "string_array": {
@@ -13,9 +13,8 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["schema_id", "schema_path"],
+          "required": ["schema_path"],
           "properties": {
-            "schema_id": { "type": "string" },
             "schema_path": { "type": "string" }
           }
         }
@@ -52,8 +51,7 @@
         "args": {
           "type": "array",
           "items": { "type": "string" }
-        },
-        "display": { "type": "string" }
+        }
       }
     },
     "step_commands": {
@@ -61,8 +59,7 @@
       "additionalProperties": false,
       "required": ["next"],
       "properties": {
-        "next": { "$ref": "#/$defs/command" },
-        "help": { "$ref": "#/$defs/command" }
+        "next": { "$ref": "#/$defs/command" }
       }
     },
     "docs": {

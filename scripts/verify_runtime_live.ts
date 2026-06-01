@@ -3,20 +3,13 @@
 import {
   existsSync,
   mkdtempSync,
-  readdirSync,
   realpathSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  findLatestQuest,
-  loadState,
-  parseTasksYaml,
-  questFiles,
-} from "./loopo_core.ts";
+import { parseTasksYaml, questFiles } from "./loopo_core.ts";
 import {
   DEFAULT_RUNTIME_REQUEST,
   readHookDecision as readSupervisorHookDecision,
@@ -45,8 +38,7 @@ type Fixture = {
 };
 
 type QuestSummary = {
-  primary_slug: string | null;
-  latest_slug: string | null;
+  wtree: string | null;
   stage: string | null;
   child_count: number;
   merged_child_count: number;
@@ -141,7 +133,7 @@ function writeFixtureFiles(repo: string): void {
     [
       "# Loopo Fixture",
       "",
-      'When the user prompt starts with `loopo:`, run `loopo init "{request}" --cwd <cwd> --runtime <runtime>` and follow the returned instructions.',
+      'When the user prompt starts with `loopo:`, run `loopo init "{request}" --runtime <runtime>` from the repo root and follow the returned instructions.',
     ].join("\n"),
     "utf8",
   );
@@ -386,8 +378,7 @@ export function cliInvocation(
 
 export function emptyQuestSummary(): QuestSummary {
   return {
-    primary_slug: null,
-    latest_slug: null,
+    wtree: null,
     stage: null,
     child_count: 0,
     merged_child_count: 0,
@@ -424,47 +415,6 @@ function countJsonl(path: string): number {
     .filter((line) => line.trim()).length;
 }
 
-function questMtime(repo: string, slug: string): number {
-  const files = questFiles(repo, slug);
-  return existsSync(files.tasks) ? statSync(files.tasks).mtimeMs : 0;
-}
-
-function auxiliaryQuestSlug(slug: string): boolean {
-  return slug.startsWith("execute-child-task-");
-}
-
-function selectPrimaryQuestSlug(fixture: Fixture): {
-  primarySlug: string | null;
-  latestSlug: string | null;
-} {
-  const state = loadState(fixture.repo);
-  const activeSlug = state.active_quest_slug;
-  if (activeSlug && existsSync(questFiles(fixture.repo, activeSlug).tasks)) {
-    const latest = findLatestQuest(fixture.repo);
-    return {
-      primarySlug: activeSlug,
-      latestSlug: latest?.files.slug ?? activeSlug,
-    };
-  }
-
-  const questsDir = join(fixture.repo, ".loopo", "quests");
-  if (!existsSync(questsDir)) {
-    return { primarySlug: null, latestSlug: null };
-  }
-
-  const slugs = readdirSync(questsDir).filter((slug) =>
-    existsSync(questFiles(fixture.repo, slug).tasks),
-  );
-  const sorted = [...slugs].sort(
-    (left, right) =>
-      questMtime(fixture.repo, right) - questMtime(fixture.repo, left),
-  );
-  const latestSlug = sorted[0] ?? null;
-  const rootSlug =
-    sorted.find((slug) => !auxiliaryQuestSlug(slug)) ?? latestSlug;
-  return { primarySlug: rootSlug, latestSlug };
-}
-
 function pythonFiles(repo: string): string[] {
   if (!commandExists("rg")) return [];
   const proc = runCommand(
@@ -498,12 +448,14 @@ function gitCommitCount(repo: string, env: Record<string, string>): number {
   return Number.isFinite(count) ? count : 0;
 }
 
-function summarizeQuest(fixture: Fixture): QuestSummary {
-  const { primarySlug, latestSlug } = selectPrimaryQuestSlug(fixture);
-  if (!primarySlug) {
+function summarizeQuest(
+  fixture: Fixture,
+  wtree: string | null = null,
+): QuestSummary {
+  const selectedWtree = String(wtree ?? "").trim();
+  if (!selectedWtree || !existsSync(questFiles(fixture.repo, selectedWtree).tasks)) {
     return {
-      primary_slug: null,
-      latest_slug: latestSlug,
+      wtree: selectedWtree || null,
       stage: null,
       child_count: 0,
       merged_child_count: 0,
@@ -516,7 +468,7 @@ function summarizeQuest(fixture: Fixture): QuestSummary {
       python_files: pythonFiles(fixture.repo),
     };
   }
-  const files = questFiles(fixture.repo, primarySlug);
+  const files = questFiles(fixture.repo, selectedWtree);
   const state = parseTasksYaml(readText(files.tasks));
   const tasks = Array.isArray(state.tasks) ? state.tasks : [];
   const mergedChildIds = tasks
@@ -540,8 +492,7 @@ function summarizeQuest(fixture: Fixture): QuestSummary {
     )
     .map((task) => String(task.id));
   return {
-    primary_slug: primarySlug,
-    latest_slug: latestSlug,
+    wtree: selectedWtree,
     stage: typeof state.stage === "string" ? state.stage : null,
     child_count: tasks.length,
     merged_child_count: mergedChildIds.length,
@@ -596,11 +547,12 @@ export function matchProcessSkipReason(proc: ProcessLike): string | null {
 
 function evaluateResult(
   fixture: Fixture,
+  wtree: string | null,
   proc: ReturnType<typeof runCommand>,
   durationMs: number,
   logPath: string,
 ): LiveResult {
-  const summary = summarizeQuest(fixture);
+  const summary = summarizeQuest(fixture, wtree);
   const combined = `${proc.stdout}\n${proc.stderr}`.trim();
   const skipReason =
     matchProcessSkipReason(proc) ?? matchSkipReason(combined);
@@ -646,7 +598,7 @@ function evaluateResult(
     runtime: fixture.runtime,
     status: "failed",
     reason:
-      `${exitReason}; primary=${summary.primary_slug ?? "none"}; latest=${summary.latest_slug ?? "none"}; ` +
+      `${exitReason}; wtree=${summary.wtree ?? "none"}; ` +
       `final stage=${summary.stage ?? "none"}; unmerged_children=${summary.unmerged_child_ids.join(",") || "none"}`,
     duration_ms: durationMs,
     repo: fixture.repo,
@@ -655,7 +607,7 @@ function evaluateResult(
   };
 }
 
-function readHookDecision(fixture: Fixture): {
+function readHookDecision(fixture: Fixture, wtree: string): {
   reason: string | null;
   raw: Record<string, unknown>;
 } {
@@ -663,6 +615,7 @@ function readHookDecision(fixture: Fixture): {
     repoRoot: fixture.repo,
     env: fixture.env,
     runtime: fixture.runtime,
+    cwd: join(fixture.repo, "worktrees", wtree),
   });
   return { reason: hook.reason, raw: hook.output };
 }
@@ -721,7 +674,7 @@ export function runLiveRuntime(
     logChunks.push(
       [
         "# init",
-        `$ loopo init ${JSON.stringify(DEFAULT_RUNTIME_REQUEST)} --cwd ${fixture.repo} --runtime ${fixture.runtime}`,
+        `$ loopo init ${JSON.stringify(DEFAULT_RUNTIME_REQUEST)} --runtime ${fixture.runtime}`,
         "",
         "STDOUT",
         started.init.stdout,
@@ -753,10 +706,10 @@ export function runLiveRuntime(
     );
     let lastProc = started.routeProc;
     for (let guard = 0; guard < 20; guard += 1) {
-      const summary = summarizeQuest(fixture);
+      const summary = summarizeQuest(fixture, started.wtree);
       if (summary.stage === "archived") break;
-      if (!summary.primary_slug) break;
-      const hook = readHookDecision(fixture);
+      if (!summary.wtree) break;
+      const hook = readHookDecision(fixture, started.wtree);
       logChunks.push(
         [`# hook-${guard + 1}`, JSON.stringify(hook.raw, null, 2), ""].join(
           "\n",
@@ -776,7 +729,7 @@ export function runLiveRuntime(
     const durationMs = Date.now() - startedAt;
     const logPath = join(fixture.root, `${runtime}.log`);
     writeFileSync(logPath, logChunks.join("\n"), "utf8");
-    return evaluateResult(fixture, lastProc, durationMs, logPath);
+    return evaluateResult(fixture, started.wtree, lastProc, durationMs, logPath);
   } catch (error) {
     return {
       runtime,

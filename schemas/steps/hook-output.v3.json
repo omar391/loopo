@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://loopo.dev/schemas/steps/hook-output.v3.json",
+  "$id": "schemas/steps/hook-output.v3.json",
   "title": "Loopo V3 Runtime Hook Output",
   "type": "object",
   "additionalProperties": false,

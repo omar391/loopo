@@ -10,6 +10,6 @@ instructions: |-
 
   Record answers from the most recent grouped clarification round. Preserve the
   original question ids, carry forward any previously recorded explicit
-  defaults, and submit answers through `loopo quest next --slug <slug> --json
+  defaults, and submit answers through `loopo quest next --wtree <name> --json
   @-` with the `questions` step schema. Do not auto-answer unresolved
   questions; wait for human-provided answers before resuming planning.

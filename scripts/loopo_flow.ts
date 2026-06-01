@@ -6,10 +6,10 @@ import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { readText } from "./loopo_utils.ts";
 import {
-  FLOW_SCHEMA_ID,
-  STEP_DEFINITION_SCHEMA_ID,
-  v3SchemaPath,
-  validateSchemaId,
+  FLOW_SCHEMA_PATH,
+  STEP_DEFINITION_SCHEMA_PATH,
+  v3SchemaFilePath,
+  validateSchemaPath,
 } from "./loopo_schema.ts";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -82,7 +82,7 @@ function assertKnownStepSchema(name: string | null, owner: string): void {
   if (typeof name !== "string" || !name.trim()) {
     fail(`${owner} schema ref must be a non-empty string or null`);
   }
-  if (!existsSync(v3SchemaPath(name))) {
+  if (!existsSync(v3SchemaFilePath(name))) {
     fail(`${owner} references missing step schema: ${name}`);
   }
 }
@@ -90,10 +90,10 @@ function assertKnownStepSchema(name: string | null, owner: string): void {
 function assertSchemaValid(
   raw: Record<string, any>,
   path: string,
-  schemaId: string,
+  schemaPath: string,
   label: string,
 ): void {
-  const errors = validateSchemaId(raw, schemaId);
+  const errors = validateSchemaPath(raw, schemaPath);
   if (errors.length) {
     fail(`${path} ${label} schema validation failed: ${errors.join("; ")}`);
   }
@@ -144,7 +144,7 @@ export function loadStepDefinitions(
   )) {
     const path = resolve(dir, name);
     const raw = readYamlObject(path);
-    assertSchemaValid(raw, path, STEP_DEFINITION_SCHEMA_ID, "step definition");
+    assertSchemaValid(raw, path, STEP_DEFINITION_SCHEMA_PATH, "step definition");
     if (raw.schema_version !== 1) fail(`${path} schema_version must be 1`);
     for (const key of [
       "id",
@@ -192,7 +192,7 @@ export function loadFlowDefinitionFromPath(
   stepsById = loadStepDefinitions(),
 ): LoadedLoopoFlow {
   const raw = readYamlObject(path);
-  assertSchemaValid(raw, path, FLOW_SCHEMA_ID, "flow");
+  assertSchemaValid(raw, path, FLOW_SCHEMA_PATH, "flow");
   if (raw.schema_version !== 1) fail(`${path} schema_version must be 1`);
   if (expectedFlowId && raw.id !== expectedFlowId) {
     fail(`${path} id must match requested flow ${expectedFlowId}`);

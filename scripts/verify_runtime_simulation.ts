@@ -19,12 +19,12 @@ import { readText, runCommand, tsRunner } from "./loopo_utils.ts";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const LOOPO_SCRIPT = resolve(SCRIPT_DIR, "loopo.ts");
-const SIM_DIR = join(".loopo", "sim-runtime");
 
 type Fixture = {
   root: string;
   repo: string;
   env: Record<string, string>;
+  initialHead: string;
 };
 
 type SimulationCase = {
@@ -105,6 +105,20 @@ function runLoopo(
   );
 }
 
+function gitStdout(
+  repo: string,
+  args: string[],
+  env: Record<string, string>,
+): string {
+  const proc = runCommand("git", args, {
+    cwd: repo,
+    env,
+    timeoutMs: 15_000,
+  });
+  if (proc.status !== 0) fail(proc.stderr || proc.stdout);
+  return proc.stdout.trim();
+}
+
 function createFixture(prefix: string, runtime: Runtime): Fixture {
   const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
   const repo = join(root, "repo");
@@ -114,7 +128,47 @@ function createFixture(prefix: string, runtime: Runtime): Fixture {
     LOOPO_GLOBAL_BIN: join(root, "bin", "loopo"),
     LOOPO_SCRIPT: LOOPO_SCRIPT,
   };
-  return { root, repo, env };
+  const init = runCommand("git", ["init", repo], {
+    env,
+    timeoutMs: 15_000,
+  });
+  if (init.status !== 0) fail(init.stderr || init.stdout);
+  for (const [key, value] of [
+    ["user.email", "loopo-sim@example.invalid"],
+    ["user.name", `Loopo ${runtime} Simulator`],
+  ] as const) {
+    const config = runCommand("git", ["config", key, value], {
+      cwd: repo,
+      env,
+      timeoutMs: 15_000,
+    });
+    if (config.status !== 0) fail(config.stderr || config.stdout);
+  }
+  const branch = runCommand("git", ["checkout", "-B", "main"], {
+    cwd: repo,
+    env,
+    timeoutMs: 15_000,
+  });
+  if (branch.status !== 0) fail(branch.stderr || branch.stdout);
+  // Test fixture setup: sim is being run inside an existing repo with HEAD.
+  const existingRepoHead = runCommand(
+    "git",
+    ["commit", "--allow-empty", "-m", "simulation test baseline"],
+    {
+      cwd: repo,
+      env,
+      timeoutMs: 15_000,
+    },
+  );
+  if (existingRepoHead.status !== 0) {
+    fail(existingRepoHead.stderr || existingRepoHead.stdout);
+  }
+  return {
+    root,
+    repo,
+    env,
+    initialHead: gitStdout(repo, ["rev-parse", "HEAD"], env),
+  };
 }
 
 function currentStage(fixture: Fixture, slug: string): string {
@@ -161,9 +215,38 @@ function assertGuidedStep(
     fail(`${label}: guided sim step must include commands.next`);
   }
   const args = Array.isArray(command.args) ? command.args : [];
-  const expected = ["sim", "--repo", repo, "--json", "@-"];
+  const expected = [
+    "sim",
+    "quest",
+    "next",
+    "--wtree",
+    String(step.wtree ?? ""),
+    "--json",
+    "@-",
+  ];
   if (JSON.stringify(args) !== JSON.stringify(expected)) {
     fail(`${label}: guided sim commands.next mismatch: ${JSON.stringify(args)}`);
+  }
+}
+
+function assertNoFixtureFiles(repo: string, label: string): void {
+  for (const name of ["callback-fixture.txt", "hook-fixture.txt"]) {
+    if (existsSync(join(repo, name))) {
+      fail(`${label}: sim must not create ${name}`);
+    }
+  }
+}
+
+function assertNoSimRuntimeArtifacts(repo: string, label: string): void {
+  if (existsSync(join(repo, ".loopo", "sim-runtime"))) {
+    fail(`${label}: sim must not create .loopo/sim-runtime`);
+  }
+}
+
+function assertHeadUnchanged(fixture: Fixture, label: string): void {
+  const currentHead = gitStdout(fixture.repo, ["rev-parse", "HEAD"], fixture.env);
+  if (currentHead !== fixture.initialHead) {
+    fail(`${label}: sim start must not create commits or move HEAD`);
   }
 }
 
@@ -175,21 +258,16 @@ function simCommandArgs(step: Record<string, any>, label: string): string[] {
   return args.map(String);
 }
 
-function assertLifecycleLog(
-  repo: string,
+function assertLifecycleProgress(
   request: string,
   label: string,
+  requestSteps: string[],
+  responseSteps: string[],
 ): void {
   const scenario = selectSimProductQuestScenario(request);
-  const events = readJsonl(join(repo, SIM_DIR, "events.jsonl"));
-  const steps = events.filter((record) => record.kind === "guided_step");
-  if (steps.length === 0) {
+  if (requestSteps.length === 0 || responseSteps.length === 0) {
     fail(`${label}: expected at least one guided simulated step`);
   }
-
-  const requestSteps = steps.map((record) => stepId(record.requested_step));
-  const responseSteps = steps.map((record) => stepId(record.response?.step));
-
   const requiredRequestSteps = scenario.expect_question_round
     ? [
         "plan",
@@ -251,9 +329,6 @@ function assertLifecycleLog(
         fail(`${label}: concrete simulation unexpectedly emitted ${step}`);
       }
     }
-  }
-  if (existsSync(join(repo, SIM_DIR, "pending-callback.json"))) {
-    fail(`${label}: pending callback should be cleared after archive`);
   }
 }
 
@@ -365,6 +440,7 @@ function assertSimHookPassthrough(runtime: Runtime): void {
       fixture,
       [
         "sim",
+        "init",
         DEFAULT_RUNTIME_REQUEST,
         "--repo",
         fixture.repo,
@@ -376,6 +452,11 @@ function assertSimHookPassthrough(runtime: Runtime): void {
       undefined,
     );
     if (start.status !== 0) fail(start.stderr || start.stdout);
+    const started = parseJson(start.stdout, `${label} sim start`);
+    const wtree = String(started.wtree ?? "");
+    if (!wtree) fail(`${label}: missing wtree in sim start output`);
+    assertNoFixtureFiles(fixture.repo, label);
+    assertHeadUnchanged(fixture, label);
     const hook = runLoopo(
       fixture,
       [
@@ -388,7 +469,7 @@ function assertSimHookPassthrough(runtime: Runtime): void {
         "--json",
         JSON.stringify({
           hook_event_name: hookEventName(runtime),
-          cwd: fixture.repo,
+          cwd: join(fixture.repo, "worktrees", wtree),
         }),
       ],
       undefined,
@@ -399,6 +480,7 @@ function assertSimHookPassthrough(runtime: Runtime): void {
     if (typeof output.reason !== "string" || !output.reason.trim()) {
       fail(`${label}: sim hook must expose hook reason payload`);
     }
+    assertNoSimRuntimeArtifacts(fixture.repo, label);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -418,6 +500,7 @@ function simulateRuntime(
       fixture,
       [
         "sim",
+        "init",
         simulationCase.request,
         "--repo",
         fixture.repo,
@@ -431,10 +514,12 @@ function simulateRuntime(
     if (start.status !== 0) {
       fail(start.stderr || start.stdout || `${label}: sim start failed`);
     }
+    assertNoFixtureFiles(fixture.repo, label);
+    assertHeadUnchanged(fixture, label);
     let current = parseJson(start.stdout, `${label} sim start`);
     assertGuidedStep(current, fixture.repo, label);
-    const slug = String(current.slug ?? "");
-    if (!slug) fail(`${label}: missing slug in sim start output`);
+    const wtree = String(current.wtree ?? "");
+    if (!wtree) fail(`${label}: missing wtree in sim start output`);
     if (String(current.current_stage ?? "") !== "planning") {
       fail(`${label}: sim start must enter planning: ${start.stdout}`);
     }
@@ -442,14 +527,17 @@ function simulateRuntime(
     let planRound = 0;
     let landingRound = 0;
     let childInitRuntimeChecks = 0;
+    const requestedSteps: string[] = [];
+    const responseSteps: string[] = [];
     for (let guard = 0; guard < 20; guard += 1) {
-      if (current.done === true || currentStage(fixture, slug) === "archived") break;
+      if (current.done === true || currentStage(fixture, wtree) === "archived") break;
       const requestedStep = stepId(current.step);
       if (!requestedStep) {
         fail(`${label}: missing requested step in guided output`);
       }
+      requestedSteps.push(requestedStep);
       const quest = parseTasksYaml(
-        readText(questFiles(fixture.repo, slug).tasks),
+        readText(questFiles(fixture.repo, wtree).tasks),
       ) as Record<string, any>;
       const callbackInput = scenarioPayloadForStep({
         request: simulationCase.request,
@@ -474,6 +562,7 @@ function simulateRuntime(
       }
       current = parseJson(callbackProc.stdout, `${label} guided sim output`);
       assertGuidedStep(current, fixture.repo, label);
+      responseSteps.push(stepId(current.step));
       childInitRuntimeChecks += assertChildInitRuntime(current, runtime, label);
       if (!stepId((current as Record<string, unknown>).step)) {
         fail(
@@ -490,12 +579,18 @@ function simulateRuntime(
         `${label}: simulation must report archived: ${JSON.stringify(current)}`,
       );
     }
-    if (currentStage(fixture, slug) !== "archived") {
+    if (currentStage(fixture, wtree) !== "archived") {
       fail(`${label}: simulation did not reach archived`);
     }
 
-    assertLifecycleLog(fixture.repo, simulationCase.request, label);
-    assertCanonicalArtifacts(fixture, slug, simulationCase.request, label);
+    assertLifecycleProgress(
+      simulationCase.request,
+      label,
+      requestedSteps,
+      responseSteps,
+    );
+    assertNoSimRuntimeArtifacts(fixture.repo, label);
+    assertCanonicalArtifacts(fixture, wtree, simulationCase.request, label);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }

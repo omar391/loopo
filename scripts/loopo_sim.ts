@@ -1,20 +1,12 @@
 #!/usr/bin/env bun
 
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { appendJsonl, parseTasksYaml, questFiles } from "./loopo_core.ts";
+import { parseTasksYaml, questFiles } from "./loopo_core.ts";
 import { DEFAULT_FLOW_ID, flowStep, loadFlowDefinition } from "./loopo_flow.ts";
 import {
   readHookDecision as readSupervisorHookDecision,
-  routeQuestInit,
 } from "./runtime_supervisor.ts";
 import {
   expandHome,
@@ -22,9 +14,7 @@ import {
   readStdinJson,
   readText,
   runCommand,
-  shellQuote,
   tsRunner,
-  writeJson,
 } from "./loopo_utils.ts";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -33,33 +23,20 @@ const SETUP_RUNTIME_HOOKS_SCRIPT = resolve(
   SCRIPT_DIR,
   "setup_runtime_hooks.ts",
 );
-const SIM_DIR = join(".loopo", "sim-runtime");
-const PENDING_CALLBACK_FILE = join(SIM_DIR, "pending-callback.json");
-const EVENT_LOG_FILE = join(SIM_DIR, "events.jsonl");
-const SESSION_FILE = join(SIM_DIR, "session.json");
 
 type Runtime = "codex" | "gemini" | "copilot";
-type SimProfile = "interactive";
-type SimMode = "guided" | "hook";
+type SimCommand = "init" | "quest_next" | "hook";
 
 type SimArgs = {
-  mode: SimMode;
+  command: SimCommand;
   repo: string | null;
   runtime: string | null;
   json: string | null;
   request: string | null;
   flow: string | null;
-};
-
-type SimSession = {
-  schema_version: 1;
-  profile: SimProfile;
-  repo_root: string;
-  runtime: Runtime;
-  request: string;
-  flow_id: string;
-  slug: string;
-  started_at: string;
+  wtree: string | null;
+  full: boolean;
+  rest: string[];
 };
 
 type QuestLikeState = Partial<{
@@ -77,13 +54,11 @@ type QuestLikeState = Partial<{
   }>;
 }>;
 
-const RETIRED_COMMANDS = new Set(["start", "next", "status", "callback"]);
-
 function usage(exitCode = 1): number {
   const text = [
     "Usage:",
-    '  loopo sim "loopo: <request>" [--repo <path>] [--runtime <codex|gemini|copilot>] [--flow <id>]',
-    "  loopo sim --repo <path> --json <json|@file|@->",
+    '  loopo sim init "loopo: <request>" [--repo <path>] [--runtime <codex|gemini|copilot>] [--flow <id>] [--wtree <name>]',
+    "  loopo sim quest next --wtree <name> [--repo <path>] --json <json|@file|@->",
     "  loopo sim hook [--repo <path>] [--runtime <codex|gemini|copilot>] [--json <json|@file|@->]",
   ].join("\n");
   if (exitCode === 0) console.log(text);
@@ -96,44 +71,72 @@ function fail(message: string): never {
 }
 
 function parseArgs(argv: string[]): SimArgs {
-  let mode: SimMode = "guided";
   let repo: string | null = null;
   let runtime: string | null = null;
   let json: string | null = null;
   let flow: string | null = null;
+  let wtree: string | null = null;
+  let full = false;
   const requestParts: string[] = [];
-  const rest = [...argv];
+  const rest: string[] = [];
+  const command = argv[0];
+  let simCommand: SimCommand;
+  let body: string[];
 
-  if (rest[0] === "hook") {
-    mode = "hook";
-    rest.shift();
-  } else if (rest[0] && RETIRED_COMMANDS.has(rest[0])) {
-    throw new Error(`unknown sim command: ${rest[0]}`);
+  if (command === "init") {
+    simCommand = "init";
+    body = argv.slice(1);
+  } else if (command === "quest") {
+    const subcommand = argv[1];
+    if (subcommand === "next") {
+      simCommand = "quest_next";
+      body = argv.slice(2);
+    } else {
+      throw new Error(`unknown sim quest command: ${subcommand ?? ""}`.trim());
+    }
+  } else if (command === "hook") {
+    simCommand = "hook";
+    body = argv.slice(1);
+  } else if (command === "--help" || command === "-h") {
+    throw new Error("__SIM_HELP__");
+  } else {
+    throw new Error(`unknown sim command: ${command ?? ""}`.trim());
   }
 
-  for (let i = 0; i < rest.length; i += 1) {
-    const arg = rest[i];
-    if (arg === "--repo") repo = rest[++i] ?? null;
+  for (let i = 0; i < body.length; i += 1) {
+    const arg = body[i];
+    if (arg === "--repo") repo = body[++i] ?? null;
     else if (arg?.startsWith("--repo=")) repo = arg.slice("--repo=".length);
-    else if (arg === "--runtime") runtime = rest[++i] ?? null;
+    else if (arg === "--cwd" || arg?.startsWith("--cwd=")) {
+      throw new Error("loopo sim no longer accepts --cwd; use --repo or run from the repo root");
+    } else if (arg === "--slug" || arg?.startsWith("--slug=")) {
+      throw new Error("loopo sim no longer accepts --slug; use --wtree");
+    } else if (arg === "--wtree") wtree = body[++i] ?? null;
+    else if (arg?.startsWith("--wtree=")) wtree = arg.slice("--wtree=".length);
+    else if (arg === "--runtime") runtime = body[++i] ?? null;
     else if (arg?.startsWith("--runtime="))
       runtime = arg.slice("--runtime=".length);
-    else if (arg === "--json") json = rest[++i] ?? "@-";
+    else if (arg === "--json") json = body[++i] ?? "@-";
     else if (arg?.startsWith("--json=")) json = arg.slice("--json=".length);
-    else if (arg === "--flow") flow = rest[++i] ?? null;
+    else if (arg === "--flow") flow = body[++i] ?? null;
     else if (arg?.startsWith("--flow=")) flow = arg.slice("--flow=".length);
+    else if (arg === "--full") full = true;
     else if (arg === "--help" || arg === "-h") throw new Error("__SIM_HELP__");
     else if (arg?.startsWith("-")) throw new Error(`unknown sim argument: ${arg}`);
-    else if (arg !== undefined) requestParts.push(arg);
+    else if (arg !== undefined && simCommand === "init") requestParts.push(arg);
+    else if (arg !== undefined) rest.push(arg);
   }
 
   return {
-    mode,
+    command: simCommand,
     repo,
     runtime,
     json,
     request: requestParts.join(" ").trim() || null,
     flow,
+    wtree,
+    full,
+    rest,
   };
 }
 
@@ -150,7 +153,7 @@ function resolveRuntime(
 
 function normalizeRequestText(request: string): string {
   const raw = request.trim();
-  if (!raw) fail("guided sim start requires a request");
+  if (!raw) fail("sim init requires a request");
   return /^loopo:/i.test(raw) ? raw : `loopo: ${raw}`;
 }
 
@@ -160,21 +163,9 @@ function resolveFlowId(value: string | null | undefined): string {
   return flowId;
 }
 
-function defaultRepoRoot(explicit: string | null): string {
-  if (explicit) return resolve(expandHome(explicit));
-  return join(mkdtempSync(join(tmpdir(), "loopo-sim-")), "repo");
-}
-
-function simBinPath(repoRoot: string): string {
-  return resolve(repoRoot, SIM_DIR, "bin", "loopo");
-}
-
-function simEnv(repoRoot: string): Record<string, string> {
-  return {
-    PATH: `${dirname(simBinPath(repoRoot))}:${process.env.PATH ?? ""}`,
-    LOOPO_GLOBAL_BIN: simBinPath(repoRoot),
-    LOOPO_SCRIPT: LOOPO_SCRIPT,
-  };
+function defaultRepoRoot(repo: string | null): string {
+  if (repo) return resolve(expandHome(repo));
+  return resolve(process.cwd());
 }
 
 function parseJsonText(text: string, label: string): Record<string, unknown> {
@@ -224,101 +215,6 @@ function resolveRepoRoot(
   return resolve(expandHome(raw));
 }
 
-function ensureSimDir(repoRoot: string): string {
-  const path = resolve(repoRoot, SIM_DIR);
-  mkdirSync(path, { recursive: true });
-  return path;
-}
-
-function simPath(repoRoot: string, relativePath: string): string {
-  ensureSimDir(repoRoot);
-  return resolve(repoRoot, relativePath);
-}
-
-function loadSession(repoRoot: string): SimSession | null {
-  const parsed = readJson(simPath(repoRoot, SESSION_FILE));
-  if (!parsed || typeof parsed !== "object") return null;
-  return parsed as SimSession;
-}
-
-function saveSession(repoRoot: string, session: SimSession): void {
-  writeJson(simPath(repoRoot, SESSION_FILE), session);
-}
-
-function logEvent(repoRoot: string, record: Record<string, unknown>): void {
-  appendJsonl(simPath(repoRoot, EVENT_LOG_FILE), record);
-}
-
-function clearPendingCallback(repoRoot: string): void {
-  rmSync(simPath(repoRoot, PENDING_CALLBACK_FILE), { force: true });
-}
-
-function savePendingCallback(
-  repoRoot: string,
-  record: Record<string, unknown>,
-): void {
-  writeJson(simPath(repoRoot, PENDING_CALLBACK_FILE), record);
-}
-
-function resetSimulationArtifacts(repoRoot: string): void {
-  clearPendingCallback(repoRoot);
-  writeFileSync(simPath(repoRoot, EVENT_LOG_FILE), "", "utf8");
-}
-
-function ensureFixtureRepo(repoRoot: string, runtime: Runtime): void {
-  mkdirSync(repoRoot, { recursive: true });
-  const env = simEnv(repoRoot);
-  const createdRepo = !existsSync(join(repoRoot, ".git"));
-  if (createdRepo) {
-    const init = runCommand("git", ["init", repoRoot], {
-      env,
-      timeoutMs: 15_000,
-    });
-    if (init.status !== 0) fail(init.stderr || init.stdout);
-    for (const [key, value] of [
-      ["user.email", "loopo-sim@example.invalid"],
-      ["user.name", `Loopo ${runtime} Simulator`],
-    ] as const) {
-      const proc = runCommand("git", ["config", key, value], {
-        cwd: repoRoot,
-        env,
-        timeoutMs: 15_000,
-      });
-      if (proc.status !== 0) fail(proc.stderr || proc.stdout);
-    }
-  }
-  const seeds: Array<[string, string]> = [
-    ["README.md", "# loopo simulated quest\n"],
-    ["hook-fixture.txt", "hook fixture\n"],
-    ["callback-fixture.txt", "callback fixture\n"],
-  ];
-  let wroteSeed = false;
-  for (const [name, body] of seeds) {
-    const path = join(repoRoot, name);
-    if (existsSync(path)) continue;
-    writeFileSync(path, body, "utf8");
-    wroteSeed = true;
-  }
-  if (createdRepo && wroteSeed) {
-    const add = runCommand(
-      "git",
-      ["add", "README.md", "hook-fixture.txt", "callback-fixture.txt"],
-      {
-        cwd: repoRoot,
-        env,
-        timeoutMs: 15_000,
-      },
-    );
-    if (add.status !== 0) fail(add.stderr || add.stdout);
-    const commit = runCommand("git", ["commit", "-m", "simulation fixture"], {
-      cwd: repoRoot,
-      env,
-      timeoutMs: 15_000,
-    });
-    if (commit.status !== 0) fail(commit.stderr || commit.stdout);
-  }
-}
-
 function setupSimulationHooks(repoRoot: string, runtime: Runtime): void {
   const launch = tsRunner(SETUP_RUNTIME_HOOKS_SCRIPT, [
     "--repo",
@@ -330,7 +226,6 @@ function setupSimulationHooks(repoRoot: string, runtime: Runtime): void {
   ]);
   const proc = runCommand(launch.cmd, launch.args, {
     cwd: repoRoot,
-    env: simEnv(repoRoot),
     timeoutMs: 60_000,
   });
   if (proc.status !== 0) fail(proc.stderr || proc.stdout);
@@ -344,7 +239,6 @@ function runLoopo(
   const launch = tsRunner(LOOPO_SCRIPT, args);
   return runCommand(launch.cmd, launch.args, {
     cwd: repoRoot,
-    env: simEnv(repoRoot),
     timeoutMs: 60_000,
     input: input ? JSON.stringify(input) : undefined,
   });
@@ -355,35 +249,46 @@ function questState(repoRoot: string, slug: string): QuestLikeState {
   return parseTasksYaml(readText(files.tasks)) as QuestLikeState;
 }
 
-function currentFlowStepId(repoRoot: string, session: SimSession): string {
-  const state = questState(repoRoot, session.slug);
-  const flowId =
-    String(state.flow_id ?? session.flow_id).trim() || session.flow_id;
+function currentFlowStepId(repoRoot: string, slug: string): string {
+  const state = questState(repoRoot, slug);
+  const flowId = String(state.flow_id ?? DEFAULT_FLOW_ID).trim() || DEFAULT_FLOW_ID;
   return flowStep(loadFlowDefinition(flowId), String(state.stage ?? "")).id;
 }
 
-function simCommand(args: string[]): Record<string, unknown> {
-  return {
-    cmd: "loopo",
-    args,
-    display: ["loopo", ...args.map(shellQuote)].join(" "),
-  };
+function inferSimulationRuntime(repoRoot: string): Runtime {
+  if (existsSync(resolve(repoRoot, ".codex", "hooks.json"))) return "codex";
+  if (existsSync(resolve(repoRoot, ".gemini", "settings.json"))) return "gemini";
+  if (existsSync(resolve(repoRoot, ".github", "hooks", "loopo.json"))) {
+    return "copilot";
+  }
+  return "codex";
 }
 
-function simNextCommand(repoRoot: string): Record<string, unknown> {
-  return simCommand(["sim", "--repo", repoRoot, "--json", "@-"]);
+function simCommand(args: string[]): Record<string, unknown> {
+  return { cmd: "loopo", args };
+}
+
+function simNextCommand(repoRoot: string, slug: string): Record<string, unknown> {
+  return simCommand([
+    "sim",
+    "quest",
+    "next",
+    "--wtree",
+    slug,
+    "--json",
+    "@-",
+  ]);
 }
 
 function withGuidedEnvelope(input: {
   repoRoot: string;
-  session: SimSession;
+  slug: string;
+  runtime: Runtime;
   output: Record<string, unknown>;
 }): Record<string, unknown> {
-  const state = questState(input.repoRoot, input.session.slug);
+  const state = questState(input.repoRoot, input.slug);
   const stage = String(state.stage ?? "");
-  const flowId =
-    String(state.flow_id ?? input.session.flow_id).trim() ||
-    input.session.flow_id;
+  const flowId = String(state.flow_id ?? DEFAULT_FLOW_ID).trim() || DEFAULT_FLOW_ID;
   const originalCommands =
     input.output.commands &&
     typeof input.output.commands === "object" &&
@@ -392,16 +297,16 @@ function withGuidedEnvelope(input: {
       : {};
   return {
     repo: input.repoRoot,
-    runtime: input.session.runtime,
-    request: input.session.request,
+    runtime: input.runtime,
+    request: String(state.prompt ?? ""),
     flow_id: flowId,
-    slug: input.session.slug,
+    wtree: input.slug,
     current_stage: stage,
     done: stage === "archived",
     ...input.output,
     commands: {
       ...originalCommands,
-      next: simNextCommand(input.repoRoot),
+      next: simNextCommand(input.repoRoot, input.slug),
     },
   };
 }
@@ -417,7 +322,7 @@ function executeHook(
 } {
   const hook = readSupervisorHookDecision({
     repoRoot,
-    env: simEnv(repoRoot),
+    env: process.env,
     runtime,
     raw,
   });
@@ -426,23 +331,60 @@ function executeHook(
   const reason = hook.reason
     ? (parseJsonText(hook.reason, "hook reason") as Record<string, unknown>)
     : null;
-  if (reason) {
-    savePendingCallback(repoRoot, {
-      runtime,
-      envelope,
-      hook_output: output,
-      reason,
-    });
-  } else {
-    clearPendingCallback(repoRoot);
-  }
-  logEvent(repoRoot, {
-    kind: "hook",
-    runtime,
-    envelope,
-    hook_output: output,
-  });
   return { envelope, output, reason };
+}
+
+function routeSimQuestInit(input: {
+  repoRoot: string;
+  runtime: Runtime;
+  request: string;
+  flowId: string;
+  wtree: string | null;
+}): { slug: string; createOutput: Record<string, unknown> } {
+  const initArgs = [
+    "init",
+    input.request,
+    "--repo",
+    input.repoRoot,
+    "--runtime",
+    input.runtime,
+    "--flow",
+    input.flowId,
+  ];
+  if (input.wtree) initArgs.push("--wtree", input.wtree);
+  const init = runLoopo(input.repoRoot, initArgs);
+  if (init.status !== 0) fail(init.stderr || init.stdout || "loopo init failed");
+  const route = parseJsonText(init.stdout, "init output");
+  const newQuest =
+    route.new_quest && typeof route.new_quest === "object"
+      ? (route.new_quest as Record<string, unknown>)
+      : {};
+  const slug = String(newQuest.suggested_wtree ?? "").trim();
+  if (!slug) fail(`missing wtree in init output: ${init.stdout}`);
+  const createInput =
+    newQuest.input && typeof newQuest.input === "object"
+      ? (newQuest.input as Record<string, unknown>)
+      : null;
+  if (!createInput) fail("loopo init did not emit a create_quest input");
+  const routeProc = runLoopo(
+    input.repoRoot,
+    [
+      "quest",
+      "next",
+      "--wtree",
+      slug,
+      "--json",
+      "@-",
+    ],
+    createInput,
+  );
+  if (routeProc.status !== 0) {
+    fail(routeProc.stderr || routeProc.stdout || "new_quest.command failed");
+  }
+  return {
+    slug,
+    createOutput: parseJsonText(routeProc.stdout, "route output"),
+  };
 }
 
 function runHookMode(args: SimArgs): number {
@@ -454,49 +396,30 @@ function runHookMode(args: SimArgs): number {
   return 0;
 }
 
-function runGuidedStart(args: SimArgs): number {
+function runSimInit(args: SimArgs): number {
   if (!args.request) {
     throw new Error(
-      'guided sim start requires a request, for example: loopo sim "loopo: build the app" --flow swe --runtime codex',
+      'sim init requires a request, for example: loopo sim init "loopo: build the app" --flow swe --runtime codex',
     );
   }
   const repoRoot = defaultRepoRoot(args.repo);
   const runtime = resolveRuntime(args.runtime);
   const request = normalizeRequestText(args.request);
   const flowId = resolveFlowId(args.flow);
-  ensureFixtureRepo(repoRoot, runtime);
   setupSimulationHooks(repoRoot, runtime);
-  resetSimulationArtifacts(repoRoot);
-  const started = routeQuestInit({
+  const started = routeSimQuestInit({
     repoRoot,
-    env: simEnv(repoRoot),
     runtime,
     request,
     flowId,
-  });
-  const session: SimSession = {
-    schema_version: 1,
-    profile: "interactive",
-    repo_root: repoRoot,
-    runtime,
-    request,
-    flow_id: flowId,
-    slug: started.slug,
-    started_at: new Date().toISOString(),
-  };
-  saveSession(repoRoot, session);
-  logEvent(repoRoot, {
-    kind: "start",
-    runtime,
-    request,
-    flow_id: flowId,
-    slug: started.slug,
+    wtree: args.wtree,
   });
   process.stdout.write(
     JSON.stringify(
       withGuidedEnvelope({
         repoRoot,
-        session,
+        slug: started.slug,
+        runtime,
         output: started.createOutput,
       }),
       null,
@@ -506,41 +429,48 @@ function runGuidedStart(args: SimArgs): number {
   return 0;
 }
 
-function runGuidedContinuation(args: SimArgs): number {
+function runSimQuestNext(args: SimArgs): number {
   if (!args.json) {
-    throw new Error("guided sim continuation requires --json <json|@file|@->");
+    throw new Error("sim quest next requires --json <json|@file|@->");
+  }
+  const slug = String(args.wtree ?? "").trim();
+  if (!slug) {
+    throw new Error("sim quest next requires --wtree <name>");
   }
   const payload = readJsonArg(args.json);
   if (Object.keys(payload).length === 0) {
-    throw new Error("guided sim continuation requires a non-empty JSON payload");
+    throw new Error("sim quest next requires a non-empty JSON payload");
   }
   const repoRoot = resolveRepoRoot(args.repo, payload);
-  const session = loadSession(repoRoot);
-  if (!session) {
-    throw new Error(`missing simulation session in ${simPath(repoRoot, SESSION_FILE)}`);
+  if (!existsSync(questFiles(repoRoot, slug).tasks)) {
+    throw new Error(`missing quest state for simulated quest: ${slug}`);
   }
-  const requestedStep = currentFlowStepId(repoRoot, session);
+  currentFlowStepId(repoRoot, slug);
+  const questArgs = [
+    "quest",
+    "next",
+    "--wtree",
+    slug,
+    "--json",
+    "@-",
+  ];
+  if (args.full) questArgs.push("--full");
   const proc = runLoopo(
     repoRoot,
-    ["quest", "next", "--slug", session.slug, "--cwd", repoRoot, "--json", "@-"],
+    questArgs,
     payload,
   );
   if (proc.status !== 0) {
     throw new Error(proc.stderr || proc.stdout || "loopo quest next failed");
   }
   const output = parseJsonText(proc.stdout, "guided sim output");
-  logEvent(repoRoot, {
-    kind: "guided_step",
-    runtime: session.runtime,
-    requested_step: requestedStep,
-    payload,
-    response: output,
-  });
+  const runtime = resolveRuntime(args.runtime, inferSimulationRuntime(repoRoot));
   process.stdout.write(
     JSON.stringify(
       withGuidedEnvelope({
         repoRoot,
-        session,
+        slug,
+        runtime,
         output,
       }),
       null,
@@ -548,11 +478,6 @@ function runGuidedContinuation(args: SimArgs): number {
     ),
   );
   return 0;
-}
-
-function runGuidedMode(args: SimArgs): number {
-  if (args.request) return runGuidedStart(args);
-  return runGuidedContinuation(args);
 }
 
 export function runSimCli(argv: string[]): number {
@@ -566,15 +491,17 @@ export function runSimCli(argv: string[]): number {
     if (
       error instanceof Error &&
       (error.message.startsWith("unknown sim argument:") ||
-        error.message.startsWith("unknown sim command:"))
+        error.message.startsWith("unknown sim command:") ||
+        error.message.startsWith("unknown sim quest command:"))
     ) {
       console.error(error.message);
       return usage(1);
     }
     throw error;
   }
-  if (args.mode === "hook") return runHookMode(args);
-  return runGuidedMode(args);
+  if (args.command === "init") return runSimInit(args);
+  if (args.command === "quest_next") return runSimQuestNext(args);
+  return runHookMode(args);
 }
 
 if (import.meta.main) {

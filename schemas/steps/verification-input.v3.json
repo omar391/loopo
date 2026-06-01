@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://loopo.dev/schemas/steps/verification-input.v3.json",
+  "$id": "schemas/steps/verification-input.v3.json",
   "title": "Loopo V3 Verification Input",
   "type": "object",
   "additionalProperties": false,
@@ -11,13 +11,13 @@
     "acceptance_trace": {
       "type": "array",
       "items": {
-        "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/acceptance_trace"
+        "$ref": "common.v3.json#/$defs/acceptance_trace"
       }
     },
     "risks": {
       "type": "array",
       "items": {
-        "$ref": "https://loopo.dev/schemas/steps/common.v3.json#/$defs/risk"
+        "$ref": "common.v3.json#/$defs/risk"
       }
     }
   }

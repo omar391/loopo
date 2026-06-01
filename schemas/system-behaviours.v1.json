@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://loopo.dev/schemas/system-behaviours.v1.json",
+  "$id": "schemas/system-behaviours.v1.json",
   "title": "Loopo System Behaviours v1",
   "type": "object",
   "additionalProperties": false,

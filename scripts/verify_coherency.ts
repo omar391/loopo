@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { readText } from "./loopo_utils.ts";
 import { loadFlowDefinition } from "./loopo_flow.ts";
-import { validateSchemaId } from "./loopo_schema.ts";
+import { validateSchemaPath } from "./loopo_schema.ts";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const WORKSPACE_ROOT =
@@ -213,9 +213,9 @@ function main(): number {
   ) {
     throw new Error("base system behaviours YAML must be an object");
   }
-  const behaviourErrors = validateSchemaId(
+  const behaviourErrors = validateSchemaPath(
     baseBehaviours as Record<string, any>,
-    "https://loopo.dev/schemas/system-behaviours.v1.json",
+    "schemas/system-behaviours.v1.json",
   );
   if (behaviourErrors.length) {
     throw new Error(
@@ -228,7 +228,7 @@ function main(): number {
   const skill = readText(join(SKILL_ROOT, "SKILL.md"));
   assertContains(
     skill,
-    'loopo init "{request}" --cwd <cwd>',
+    'loopo init "{request}" --runtime <runtime>',
     "skills/loopo/SKILL.md",
   );
   assertContains(

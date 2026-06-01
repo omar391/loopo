@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://loopo.dev/schemas/step-definition.v1.json",
+  "$id": "schemas/step-definition.v1.json",
   "title": "Loopo Step Definition YAML v1",
   "type": "object",
   "additionalProperties": false,

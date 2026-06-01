@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://loopo.dev/schemas/tasks.v3.json",
+  "$id": "schemas/tasks.v3.json",
   "title": "Loopo Tasks YAML Model v3",
   "type": "object",
   "additionalProperties": false,

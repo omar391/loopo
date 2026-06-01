@@ -40,8 +40,8 @@ instructions: |-
   5. Apply OF to collapse answers into deterministic scope, constraints,
      acceptance, and decomposition inputs.
   6. Submit the decision-complete `plan` payload through
-     `loopo quest next --slug <slug> --json @-`; the binary owns creation and
-     mutation of `.loopo/quests/{slug}/tasks.yaml`.
+     `loopo quest next --wtree <name> --json @-`; the binary owns creation and
+     mutation of `.loopo/quests/{wtree}/tasks.yaml`.
 
   ## Question Rounds
 

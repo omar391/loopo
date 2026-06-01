@@ -18,16 +18,20 @@ const CMDPROTO_HELP_COMMANDS = [
     summary: "Start or resume a Loopo quest from an objective.",
   },
   {
-    path: "quest help",
-    summary: "Read the Loopo quest help catalog.",
-  },
-  {
     path: "quest next",
     summary: "Advance a quest with the next lifecycle payload.",
   },
   {
-    path: "sim",
-    summary: "Run a simulated Loopo lifecycle step.",
+    path: "sim hook",
+    summary: "Handle a simulated runtime hook event payload.",
+  },
+  {
+    path: "sim init",
+    summary: "Start a simulated Loopo quest from an objective.",
+  },
+  {
+    path: "sim quest next",
+    summary: "Advance a simulated quest with the next lifecycle payload.",
   },
 ] as const;
 const CMDPROTO_HELP_EXECJSON = {
@@ -283,10 +287,10 @@ async function invokeInit(params: Record<string, unknown>): Promise<CommandExecu
   if (request) {
     args.push(request);
   }
-  pushFlag(args, "--cwd", params.cwd);
+  pushFlag(args, "--repo", params.repo);
   pushFlag(args, "--runtime", params.runtime);
   pushFlag(args, "--flow", params.flow);
-  pushFlag(args, "--slug", params.slug);
+  pushFlag(args, "--wtree", params.wtree);
   const output = withCapturedOutput(() => runInit(args));
   const stdout = output.stdout.trim().startsWith("{")
     ? normalizeJsonStdout(output, "loopo init")
@@ -299,8 +303,8 @@ async function invokeQuestNext(
 ): Promise<CommandExecution> {
   const { runQuestNextV3 } = await loadLoopoCommands();
   const args: string[] = [];
-  pushFlag(args, "--slug", params.slug);
-  pushFlag(args, "--cwd", params.cwd);
+  pushFlag(args, "--repo", params.repo);
+  pushFlag(args, "--wtree", params.wtree);
   pushJsonArg(args, params.payload);
   const output = withCapturedOutput(() => runQuestNextV3(args));
   return {
@@ -310,30 +314,12 @@ async function invokeQuestNext(
   };
 }
 
-async function invokeQuestHelp(
-  params: Record<string, unknown>,
-): Promise<CommandExecution> {
-  const { runQuestHelpV3 } = await loadLoopoCommands();
-  const args: string[] = [];
-  const query = stringValue(params.query);
-  if (query) {
-    args.push(query);
-  }
-  const output = withCapturedOutput(() => runQuestHelpV3(args));
-  return {
-    statusCode: output.statusCode,
-    stdout: normalizeJsonStdout(output, "loopo quest help"),
-    stderr: output.stderr,
-  };
-}
-
 async function invokeHook(params: Record<string, unknown>): Promise<CommandExecution> {
   const { runHook } = await loadLoopoCommands();
   const args: string[] = [];
   pushFlag(args, "--runtime", params.runtime);
-  pushFlag(args, "--cwd", params.cwd);
   pushFlag(args, "--repo", params.repo);
-  pushFlag(args, "--slug", params.slug);
+  pushFlag(args, "--wtree", params.wtree);
   pushJsonArg(args, params.payload);
   const output = withCapturedOutput(() => runHook(args));
   return {
@@ -359,28 +345,52 @@ async function invokeDoctor(params: Record<string, unknown>): Promise<CommandExe
   };
 }
 
-async function invokeSim(params: Record<string, unknown>): Promise<CommandExecution> {
-  const args: string[] = [];
-  const mode = stringValue(params.mode);
-  if (mode) {
-    if (mode !== "hook") {
-      throw new Error("cmdproto sim mode is only supported for explicit hook passthrough");
-    }
-    args.push(mode);
-  } else {
-    const request = stringValue(params.request);
-    if (request) {
-      args.push(request);
-    }
+async function invokeSimInit(params: Record<string, unknown>): Promise<CommandExecution> {
+  const args = ["init"];
+  const request = stringValue(params.request);
+  if (request) {
+    args.push(request);
   }
   pushFlag(args, "--repo", params.repo);
   pushFlag(args, "--runtime", params.runtime);
   pushFlag(args, "--flow", params.flow);
+  pushFlag(args, "--wtree", params.wtree);
+  const output = withCapturedOutput(() => runSimCli(args));
+  return {
+    statusCode: output.statusCode,
+    stdout: normalizeJsonStdout(output, "loopo sim init"),
+    stderr: output.stderr,
+  };
+}
+
+async function invokeSimQuestNext(
+  params: Record<string, unknown>,
+): Promise<CommandExecution> {
+  const args = ["quest", "next"];
+  pushFlag(args, "--repo", params.repo);
+  pushFlag(args, "--wtree", params.wtree);
+  if (params.full === true) {
+    args.push("--full");
+  }
   pushJsonArg(args, params.payload);
   const output = withCapturedOutput(() => runSimCli(args));
   return {
     statusCode: output.statusCode,
-    stdout: normalizeJsonStdout(output, "loopo sim"),
+    stdout: normalizeJsonStdout(output, "loopo sim quest next"),
+    stderr: output.stderr,
+  };
+}
+
+async function invokeSimHook(params: Record<string, unknown>): Promise<CommandExecution> {
+  const args = ["hook"];
+  pushFlag(args, "--runtime", params.runtime);
+  pushFlag(args, "--repo", params.repo);
+  pushFlag(args, "--wtree", params.wtree);
+  pushJsonArg(args, params.payload);
+  const output = withCapturedOutput(() => runSimCli(args));
+  return {
+    statusCode: output.statusCode,
+    stdout: normalizeJsonStdout(output, "loopo sim hook"),
     stderr: output.stderr,
   };
 }
@@ -391,9 +401,10 @@ async function runExecJsonCommand(argv: string[]): Promise<CommandExecution> {
   if (path === "init") return await invokeInit(payload);
   if (path === "doctor") return await invokeDoctor(payload);
   if (path === "hook") return await invokeHook(payload);
-  if (path === "quest help") return await invokeQuestHelp(payload);
   if (path === "quest next") return await invokeQuestNext(payload);
-  if (path === "sim") return await invokeSim(payload);
+  if (path === "sim hook") return await invokeSimHook(payload);
+  if (path === "sim init") return await invokeSimInit(payload);
+  if (path === "sim quest next") return await invokeSimQuestNext(payload);
   throw new Error(`Unknown command: ${path}`);
 }
 
