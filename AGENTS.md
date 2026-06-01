@@ -45,10 +45,10 @@
 
 ## Working Rules
 
-- This repo is `@omar391/loopo`, a deterministic V3 workflow launcher for slug-based quest flows.
+- This repo is `@omar391/loopo`, a deterministic V3 workflow launcher for worktree-based quest flows.
 - Prefer `bun` for local execution and tests. The main verification commands are the scripts listed in `package.json`.
 - Do not edit `.loopo/**` state files directly unless you are intentionally repairing canonical runtime state.
-- For `loopo:` requests, use `loopo init "{request}" --cwd <cwd> --runtime <runtime>` and follow compact JSON step output.
+- For `loopo:` requests, use `loopo init "{request}" --runtime <runtime>` from the repo root and follow compact JSON step output.
 - Use `loopo init`, `loopo quest next`, `loopo hook`, `loopo sim`, and `loopo doctor --fix` to exercise lifecycle behavior instead of hand-editing runtime outputs.
 - Keep changes aligned with the schema-backed workflow files in `schemas/**`, `assets/**`, and `scripts/**`.
 - When changing lifecycle logic, update or run the relevant verification scripts before finishing.
