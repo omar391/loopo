@@ -171,8 +171,8 @@ function createFixture(prefix: string, runtime: Runtime): Fixture {
   };
 }
 
-function currentStage(fixture: Fixture, slug: string): string {
-  const files = questFiles(fixture.repo, slug);
+function currentStage(fixture: Fixture, wtree: string): string {
+  const files = questFiles(fixture.repo, wtree);
   return String(parseTasksYaml(readText(files.tasks)).stage ?? "");
 }
 
@@ -366,13 +366,13 @@ function assertChildInitRuntime(
 
 function assertCanonicalArtifacts(
   fixture: Fixture,
-  slug: string,
+  wtree: string,
   request: string,
   label: string,
 ): void {
   const scenario = selectSimProductQuestScenario(request);
   const expectedPlan = scenario.resolved_plan ?? scenario.initial_plan;
-  const files = questFiles(fixture.repo, slug);
+  const files = questFiles(fixture.repo, wtree);
   const state = parseTasksYaml(readText(files.tasks)) as Partial<{
     stage: string;
     tasks: Array<Partial<{ id: string; title: string }>>;

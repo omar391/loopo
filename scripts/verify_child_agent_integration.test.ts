@@ -187,7 +187,7 @@ describe("loopo v3 child wtree integration", () => {
       expect(route.schema_path).toBe(
         "schemas/steps/init-output.v3.json",
       );
-      const slug = String(route.new_quest.suggested_wtree);
+      const wtree = String(route.new_quest.suggested_wtree);
       expect((route.new_quest.command.args as string[])).not.toContain("@-");
       expect((route.new_quest.command.args as string[])).toEqual(
         expect.arrayContaining([
@@ -195,17 +195,17 @@ describe("loopo v3 child wtree integration", () => {
           JSON.stringify({
             step: "select_quest",
             action: "create_quest",
-            wtree: slug,
+            wtree: wtree,
             flow_id: "swe",
             request: "loopo: build calculator",
           }),
         ]),
       );
 
-      const created = next(fixture, slug, {
+      const created = next(fixture, wtree, {
         step: "select_quest",
         action: "create_quest",
-        wtree: slug,
+        wtree: wtree,
         request: "loopo: build calculator",
       });
       expectValidSchema(created, "step-output");
@@ -241,7 +241,7 @@ describe("loopo v3 child wtree integration", () => {
       expect(created).not.toHaveProperty("session_id");
       expect(created).not.toHaveProperty("expected_update");
 
-      const compact = compactCurrent(fixture, slug);
+      const compact = compactCurrent(fixture, wtree);
       expectValidSchema(compact, "step-output");
       expect(compact).toMatchObject({
         step: {
@@ -283,7 +283,7 @@ describe("loopo v3 child wtree integration", () => {
       expect(compact).not.toHaveProperty("kind");
       expect(compact).not.toHaveProperty("schema_path");
       expect(compact).not.toHaveProperty("input_schema");
-      expect(compact).not.toHaveProperty("slug");
+      expect(compact).not.toHaveProperty("wtree");
       expect(compact).not.toHaveProperty("flow_id");
       expect(compact).not.toHaveProperty("flow_version");
       expect(compact).not.toHaveProperty("state");
@@ -303,7 +303,7 @@ describe("loopo v3 child wtree integration", () => {
           "quest",
           "next",
           "--wtree",
-          slug,
+          wtree,
           "--json",
           "@-",
         ],
@@ -330,7 +330,7 @@ describe("loopo v3 child wtree integration", () => {
           "quest",
           "next",
           "--wtree",
-          slug,
+          wtree,
           "--json",
           "@-",
         ],
@@ -365,11 +365,11 @@ describe("loopo v3 child wtree integration", () => {
       );
       expect(vagueInit.status, vagueInit.stderr || vagueInit.stdout).toBe(0);
       const vagueRoute = parseJson(vagueInit.stdout);
-      const vagueSlug = String(vagueRoute.new_quest.suggested_wtree);
-      const vagueCreated = next(fixture, vagueSlug, {
+      const vagueWtree = String(vagueRoute.new_quest.suggested_wtree);
+      const vagueCreated = next(fixture, vagueWtree, {
         step: "select_quest",
         action: "create_quest",
-        wtree: vagueSlug,
+        wtree: vagueWtree,
         request: "loopo: create a fullstack app",
       });
       expectValidSchema(vagueCreated, "step-output");
@@ -381,7 +381,7 @@ describe("loopo v3 child wtree integration", () => {
           "quest",
           "next",
           "--wtree",
-          vagueSlug,
+          vagueWtree,
           "--json",
           "@-",
         ],
@@ -425,17 +425,17 @@ describe("loopo v3 child wtree integration", () => {
       );
       expect(serialInit.status, serialInit.stderr || serialInit.stdout).toBe(0);
       const serialRoute = parseJson(serialInit.stdout);
-      const serialSlug = String(serialRoute.new_quest.suggested_wtree);
-      const serialCreated = next(fixture, serialSlug, {
+      const serialWtree = String(serialRoute.new_quest.suggested_wtree);
+      const serialCreated = next(fixture, serialWtree, {
         step: "select_quest",
         action: "create_quest",
-        wtree: serialSlug,
+        wtree: serialWtree,
         request: "loopo: build a task tracker",
       });
       expectValidSchema(serialCreated, "step-output");
       expect(serialCreated.step).toBe("plan");
 
-      const serialPlanned = next(fixture, serialSlug, {
+      const serialPlanned = next(fixture, serialWtree, {
         step: "plan",
         classification: "greenfield_app",
         scope: "task tracker",
@@ -464,7 +464,7 @@ describe("loopo v3 child wtree integration", () => {
       expectValidSchema(serialPlanned, "step-output");
       expect(serialPlanned.step).toBe("task_graph");
 
-      const serialExecuting = next(fixture, serialSlug, {
+      const serialExecuting = next(fixture, serialWtree, {
         step: "task_graph",
         approved: true,
       });
@@ -473,10 +473,10 @@ describe("loopo v3 child wtree integration", () => {
         (serialExecuting.children as any[]).map((child) => child.task_id),
       ).toEqual(["scaffold-and-auth"]);
 
-      const serialNext = next(fixture, serialSlug, {
+      const serialNext = next(fixture, serialWtree, {
         step: "child_result",
         task_id: "scaffold-and-auth",
-        child_wtree: `${serialSlug}-scaffold-and-auth`,
+        child_wtree: `${serialWtree}-scaffold-and-auth`,
         status: "passed",
         evidence: [{ type: "summary", ref: "scaffold.txt" }],
         merge_commit: "serial123",
@@ -486,7 +486,7 @@ describe("loopo v3 child wtree integration", () => {
         ["implement-dashboard"],
       );
 
-      const planned = next(fixture, slug, {
+      const planned = next(fixture, wtree, {
         step: "plan",
         classification: "greenfield_app",
         scope: "calculator",
@@ -513,19 +513,19 @@ describe("loopo v3 child wtree integration", () => {
       expectValidSchema(planned, "step-output");
       expect(planned.step).toBe("task_graph");
 
-      const executing = next(fixture, slug, {
+      const executing = next(fixture, wtree, {
         step: "task_graph",
         approved: true,
       });
       expectValidSchema(executing, "child-dispatch-output");
       expect(executing.step).toBe("executing");
       expect(executing.state).toBe("task_graph_ready");
-      expect((executing.children as any[])[0].child_wtree).toBe(`${slug}-t001`);
+      expect((executing.children as any[])[0].child_wtree).toBe(`${wtree}-t001`);
 
-      const validating = next(fixture, slug, {
+      const validating = next(fixture, wtree, {
         step: "child_result",
         task_id: "T001",
-        child_wtree: `${slug}-t001`,
+        child_wtree: `${wtree}-t001`,
         status: "passed",
         evidence: [{ type: "summary", ref: "index.html" }],
         merge_commit: "abc123",
@@ -534,7 +534,7 @@ describe("loopo v3 child wtree integration", () => {
       expect(validating.step).toBe("validation");
       expect(
         readFileSync(
-          join(fixture.repo, ".loopo", "quests", slug, "tasks.yaml"),
+          join(fixture.repo, ".loopo", "quests", wtree, "tasks.yaml"),
           "utf8",
         ),
       ).toContain("quest_id:");
@@ -545,7 +545,7 @@ describe("loopo v3 child wtree integration", () => {
           "quest",
           "next",
           "--wtree",
-          slug,
+          wtree,
           "--json",
           "@-",
         ],
@@ -560,7 +560,7 @@ describe("loopo v3 child wtree integration", () => {
         "schema validation",
       );
 
-      const verified = next(fixture, slug, {
+      const verified = next(fixture, wtree, {
         step: "validation",
         status: "passed",
         checks: [{ name: "smoke", status: "passed" }],
@@ -568,7 +568,7 @@ describe("loopo v3 child wtree integration", () => {
       expectValidSchema(verified, "step-output");
       expect(verified.step).toBe("verification");
 
-      const systemUpdate = next(fixture, slug, {
+      const systemUpdate = next(fixture, wtree, {
         step: "verification",
         status: "passed",
         acceptance_trace: [
@@ -579,7 +579,7 @@ describe("loopo v3 child wtree integration", () => {
       expectValidSchema(systemUpdate, "step-output");
       expect(systemUpdate.step).toBe("system_update");
 
-      const compactSystemUpdate = compactCurrent(fixture, slug);
+      const compactSystemUpdate = compactCurrent(fixture, wtree);
       expectValidSchema(compactSystemUpdate, "step-output");
       expect((compactSystemUpdate.step as any).id).toBe("system_update");
       const systemUpdateSchema = compactSystemUpdate.callback_schema as Record<
@@ -601,7 +601,7 @@ describe("loopo v3 child wtree integration", () => {
           "quest",
           "next",
           "--wtree",
-          slug,
+          wtree,
           "--json",
           "@-",
         ],
@@ -618,7 +618,7 @@ describe("loopo v3 child wtree integration", () => {
         "schema validation",
       );
 
-      const landing = next(fixture, slug, {
+      const landing = next(fixture, wtree, {
         step: "system_update",
         system_update: {
           schema_version: 1,
@@ -641,7 +641,7 @@ describe("loopo v3 child wtree integration", () => {
           "quest",
           "next",
           "--wtree",
-          slug,
+          wtree,
           "--json",
           "@-",
         ],
@@ -659,7 +659,7 @@ describe("loopo v3 child wtree integration", () => {
       runGit(fixture.repo, ["reset", "HEAD", "--", "worktrees/leaked.txt"]);
       rmSync(join(fixture.repo, "worktrees"), { recursive: true, force: true });
 
-      const archived = next(fixture, slug, {
+      const archived = next(fixture, wtree, {
         step: "landing",
         status: "landed",
         summary: "done",
@@ -689,21 +689,21 @@ describe("loopo v3 child wtree integration", () => {
       );
       expect(init.status, init.stderr || init.stdout).toBe(0);
       const route = parseJson(init.stdout);
-      const slug = String(route.new_quest.suggested_wtree);
+      const wtree = String(route.new_quest.suggested_wtree);
 
-      const created = next(fixture, slug, {
+      const created = next(fixture, wtree, {
         step: "select_quest",
         action: "create_quest",
-        wtree: slug,
+        wtree: wtree,
         request: "loopo: a fullstack app",
       });
       expectValidSchema(created, "step-output");
       expect(created.step).toBe("plan");
       expect(((created.commands as any).next as any).args).toEqual(
-        expect.arrayContaining(["--wtree", slug]),
+        expect.arrayContaining(["--wtree", wtree]),
       );
 
-      const awaitingAnswers = next(fixture, slug, {
+      const awaitingAnswers = next(fixture, wtree, {
         step: "plan",
         classification: "greenfield_app",
         scope: "Generic fullstack application as requested by the user.",
@@ -726,7 +726,7 @@ describe("loopo v3 child wtree integration", () => {
       expect(awaitingAnswers.step).toBe("questions");
       expect(awaitingAnswers.state).toBe("awaiting_user_answers");
 
-      const backToPlanning = next(fixture, slug, {
+      const backToPlanning = next(fixture, wtree, {
         step: "questions",
         answers: [
           {
@@ -739,7 +739,7 @@ describe("loopo v3 child wtree integration", () => {
       expect(backToPlanning.step).toBe("plan");
       expect(backToPlanning.state).toBe("planning");
 
-      const decomposed = next(fixture, slug, {
+      const decomposed = next(fixture, wtree, {
         step: "plan",
         classification: "greenfield_app",
         scope:
@@ -898,18 +898,18 @@ describe("loopo v3 child wtree integration", () => {
       );
       expect(init.status, init.stderr || init.stdout).toBe(0);
       const route = parseJson(init.stdout);
-      const slug = String(route.new_quest.suggested_wtree);
+      const wtree = String(route.new_quest.suggested_wtree);
 
-      const created = next(fixture, slug, {
+      const created = next(fixture, wtree, {
         step: "select_quest",
         action: "create_quest",
-        wtree: slug,
+        wtree: wtree,
         request: "loopo: build lifecycle tester",
       });
       expectValidSchema(created, "step-output");
       expect(created.step).toBe("plan");
 
-      const awaitingAnswers = next(fixture, slug, {
+      const awaitingAnswers = next(fixture, wtree, {
         step: "plan",
         classification: "greenfield_app",
         scope: "lifecycle tester",
@@ -936,7 +936,7 @@ describe("loopo v3 child wtree integration", () => {
         "human-provided answers",
       );
 
-      const backToPlanning = next(fixture, slug, {
+      const backToPlanning = next(fixture, wtree, {
         step: "questions",
         answers: [
           {
@@ -949,7 +949,7 @@ describe("loopo v3 child wtree integration", () => {
       expect(backToPlanning.step).toBe("plan");
       expect(backToPlanning.state).toBe("planning");
 
-      const reviewed = next(fixture, slug, {
+      const reviewed = next(fixture, wtree, {
         step: "plan",
         classification: "greenfield_app",
         scope: "lifecycle tester",
@@ -983,7 +983,7 @@ describe("loopo v3 child wtree integration", () => {
       expectValidSchema(reviewed, "step-output");
       expect(reviewed.step).toBe("task_graph");
 
-      const rejected = next(fixture, slug, {
+      const rejected = next(fixture, wtree, {
         step: "task_graph",
         approved: false,
         replan_reason: "tighten acceptance before dispatch",
@@ -992,7 +992,7 @@ describe("loopo v3 child wtree integration", () => {
       expect(rejected.step).toBe("plan");
       expect(rejected.state).toBe("planning");
 
-      const planned = next(fixture, slug, {
+      const planned = next(fixture, wtree, {
         step: "plan",
         classification: "greenfield_app",
         scope: "lifecycle tester",
@@ -1026,7 +1026,7 @@ describe("loopo v3 child wtree integration", () => {
       expectValidSchema(planned, "step-output");
       expect(planned.step).toBe("task_graph");
 
-      const executing = next(fixture, slug, {
+      const executing = next(fixture, wtree, {
         step: "task_graph",
         approved: true,
       });
@@ -1036,7 +1036,7 @@ describe("loopo v3 child wtree integration", () => {
       expect(children[0].commands.init.args).toEqual(
         expect.arrayContaining([
           "--wtree",
-          `${slug}-t001`,
+          `${wtree}-t001`,
           "--runtime",
           "codex",
           "--flow",
@@ -1046,7 +1046,7 @@ describe("loopo v3 child wtree integration", () => {
       expect(children[1].commands.init.args).toEqual(
         expect.arrayContaining([
           "--wtree",
-          `${slug}-t002`,
+          `${wtree}-t002`,
           "--runtime",
           "codex",
           "--flow",
@@ -1054,10 +1054,10 @@ describe("loopo v3 child wtree integration", () => {
         ]),
       );
 
-      const partial = next(fixture, slug, {
+      const partial = next(fixture, wtree, {
         step: "child_result",
         task_id: "t001",
-        child_wtree: `${slug}-t001`,
+        child_wtree: `${wtree}-t001`,
         status: "passed",
         evidence: [{ type: "summary", ref: "root-fixture.txt" }],
         merge_commit: "partial123",
@@ -1068,10 +1068,10 @@ describe("loopo v3 child wtree integration", () => {
         ["t002"],
       );
 
-      const validating = next(fixture, slug, {
+      const validating = next(fixture, wtree, {
         step: "child_result",
         task_id: "t002",
-        child_wtree: `${slug}-t002`,
+        child_wtree: `${wtree}-t002`,
         status: "passed",
         evidence: [{ type: "summary", ref: "child-fixture.txt" }],
         merge_commit: "valid123",
@@ -1079,7 +1079,7 @@ describe("loopo v3 child wtree integration", () => {
       expectValidSchema(validating, "step-output");
       expect(validating.step).toBe("validation");
 
-      const verification = next(fixture, slug, {
+      const verification = next(fixture, wtree, {
         step: "validation",
         status: "passed",
         checks: [{ name: "lifecycle", status: "passed" }],
@@ -1087,7 +1087,7 @@ describe("loopo v3 child wtree integration", () => {
       expectValidSchema(verification, "step-output");
       expect(verification.step).toBe("verification");
 
-      const retryValidation = next(fixture, slug, {
+      const retryValidation = next(fixture, wtree, {
         step: "verification",
         status: "failed",
         acceptance_trace: [
@@ -1100,7 +1100,7 @@ describe("loopo v3 child wtree integration", () => {
       expect(retryValidation.step).toBe("validation");
       expect(retryValidation.state).toBe("validating");
 
-      const verified = next(fixture, slug, {
+      const verified = next(fixture, wtree, {
         step: "validation",
         status: "passed",
         checks: [{ name: "lifecycle retry", status: "passed" }],
@@ -1108,7 +1108,7 @@ describe("loopo v3 child wtree integration", () => {
       expectValidSchema(verified, "step-output");
       expect(verified.step).toBe("verification");
 
-      const systemUpdate = next(fixture, slug, {
+      const systemUpdate = next(fixture, wtree, {
         step: "verification",
         status: "passed",
         acceptance_trace: [
@@ -1120,7 +1120,7 @@ describe("loopo v3 child wtree integration", () => {
       expectValidSchema(systemUpdate, "step-output");
       expect(systemUpdate.step).toBe("system_update");
 
-      const landing = next(fixture, slug, {
+      const landing = next(fixture, wtree, {
         step: "system_update",
         system_update: {
           schema_version: 1,
@@ -1130,7 +1130,7 @@ describe("loopo v3 child wtree integration", () => {
       expectValidSchema(landing, "step-output");
       expect(landing.step).toBe("landing");
 
-      const blocked = next(fixture, slug, {
+      const blocked = next(fixture, wtree, {
         step: "landing",
         status: "blocked",
         summary: "waiting for final merge",
@@ -1139,7 +1139,7 @@ describe("loopo v3 child wtree integration", () => {
       expect(blocked.step).toBe("landing");
       expect(blocked.state).toBe("landing_ready");
 
-      const archived = next(fixture, slug, {
+      const archived = next(fixture, wtree, {
         step: "landing",
         status: "landed",
         summary: "done",
@@ -1167,16 +1167,16 @@ describe("loopo v3 child wtree integration", () => {
       );
       expect(init.status, init.stderr || init.stdout).toBe(0);
       const route = parseJson(init.stdout);
-      const slug = String(route.new_quest.suggested_wtree);
+      const wtree = String(route.new_quest.suggested_wtree);
 
-      next(fixture, slug, {
+      next(fixture, wtree, {
         step: "select_quest",
         action: "create_quest",
-        wtree: slug,
+        wtree: wtree,
         request: "loopo: build guarded child flow",
       });
 
-      next(fixture, slug, {
+      next(fixture, wtree, {
         step: "plan",
         classification: "feature",
         scope: "guarded child flow",
@@ -1195,7 +1195,7 @@ describe("loopo v3 child wtree integration", () => {
         },
       });
 
-      const executing = next(fixture, slug, {
+      const executing = next(fixture, wtree, {
         step: "task_graph",
         approved: true,
       });
@@ -1222,7 +1222,7 @@ describe("loopo v3 child wtree integration", () => {
           "quest",
           "next",
           "--wtree",
-          slug,
+          wtree,
           "--json",
           "@-",
         ],
@@ -1261,16 +1261,16 @@ describe("loopo v3 child wtree integration", () => {
       );
       expect(init.status, init.stderr || init.stdout).toBe(0);
       const route = parseJson(init.stdout);
-      const slug = String(route.new_quest.suggested_wtree);
+      const wtree = String(route.new_quest.suggested_wtree);
 
-      next(fixture, slug, {
+      next(fixture, wtree, {
         step: "select_quest",
         action: "create_quest",
-        wtree: slug,
+        wtree: wtree,
         request: "loopo: build landing guard",
       });
 
-      next(fixture, slug, {
+      next(fixture, wtree, {
         step: "plan",
         classification: "feature",
         scope: "landing guard",
@@ -1289,34 +1289,34 @@ describe("loopo v3 child wtree integration", () => {
         },
       });
 
-      next(fixture, slug, {
+      next(fixture, wtree, {
         step: "task_graph",
         approved: true,
       });
 
-      next(fixture, slug, {
+      next(fixture, wtree, {
         step: "child_result",
         task_id: "t001",
-        child_wtree: `${slug}-t001`,
+        child_wtree: `${wtree}-t001`,
         status: "passed",
         merge_commit: "landing123",
         evidence: [{ type: "summary", ref: "done.txt" }],
       });
 
-      next(fixture, slug, {
+      next(fixture, wtree, {
         step: "validation",
         status: "passed",
         checks: [{ name: "guard", status: "passed" }],
       });
 
-      next(fixture, slug, {
+      next(fixture, wtree, {
         step: "verification",
         status: "passed",
         acceptance_trace: [{ acceptance: "done", status: "passed" }],
         risks: [],
       });
 
-      next(fixture, slug, {
+      next(fixture, wtree, {
         step: "system_update",
         system_update: {
           schema_version: 1,
@@ -1325,7 +1325,7 @@ describe("loopo v3 child wtree integration", () => {
       });
 
       writeFileSync(
-        join(fixture.repo, "worktrees", slug, "DIRTY.txt"),
+        join(fixture.repo, "worktrees", wtree, "DIRTY.txt"),
         "dirty\n",
         "utf8",
       );
@@ -1336,7 +1336,7 @@ describe("loopo v3 child wtree integration", () => {
           "quest",
           "next",
           "--wtree",
-          slug,
+          wtree,
           "--json",
           "@-",
         ],
@@ -1374,16 +1374,16 @@ describe("loopo v3 child wtree integration", () => {
       );
       expect(init.status, init.stderr || init.stdout).toBe(0);
       const route = parseJson(init.stdout);
-      const slug = String(route.new_quest.suggested_wtree);
+      const wtree = String(route.new_quest.suggested_wtree);
 
-      next(fixture, slug, {
+      next(fixture, wtree, {
         step: "select_quest",
         action: "create_quest",
-        wtree: slug,
+        wtree: wtree,
         request: "loopo: build landed workflow",
       });
 
-      next(fixture, slug, {
+      next(fixture, wtree, {
         step: "plan",
         classification: "feature",
         scope: "landed workflow",
@@ -1420,14 +1420,14 @@ describe("loopo v3 child wtree integration", () => {
         },
       });
 
-      const executing = next(fixture, slug, {
+      const executing = next(fixture, wtree, {
         step: "task_graph",
         approved: true,
       });
       const children = executing.children as any[];
       expect(children).toHaveLength(2);
 
-      const parentWorktree = join(fixture.repo, "worktrees", slug);
+      const parentWorktree = join(fixture.repo, "worktrees", wtree);
 
       const runChildLifecycle = (
         child: any,
@@ -1442,12 +1442,12 @@ describe("loopo v3 child wtree integration", () => {
         );
         expect(childInit.status, childInit.stderr || childInit.stdout).toBe(0);
         const childRoute = parseJson(childInit.stdout);
-        const childSlug = String(childRoute.new_quest.suggested_wtree);
-        expect(childSlug).toBe(String(child.child_wtree));
+        const childWtree = String(childRoute.new_quest.suggested_wtree);
+        expect(childWtree).toBe(String(child.child_wtree));
 
-        next(fixture, childSlug, childRoute.new_quest.input);
+        next(fixture, childWtree, childRoute.new_quest.input);
 
-        next(fixture, childSlug, {
+        next(fixture, childWtree, {
           step: "plan",
           classification: "feature",
           scope: `${title} implementation`,
@@ -1479,20 +1479,20 @@ describe("loopo v3 child wtree integration", () => {
         runGit(childWorktree, ["commit", "-m", `feat: add ${fileName}`]);
         const childHead = gitStdout(childWorktree, ["rev-parse", "HEAD"]);
 
-        const validation = next(fixture, childSlug, {
+        const validation = next(fixture, childWtree, {
           step: "task_graph",
           approved: true,
         });
         expectValidSchema(validation, "step-output");
         expect(validation.step).toBe("validation");
 
-        next(fixture, childSlug, {
+        next(fixture, childWtree, {
           step: "validation",
           status: "passed",
           checks: [{ name: `${fileName}-smoke`, status: "passed" }],
         });
 
-        next(fixture, childSlug, {
+        next(fixture, childWtree, {
           step: "verification",
           status: "passed",
           acceptance_trace: [
@@ -1501,7 +1501,7 @@ describe("loopo v3 child wtree integration", () => {
           risks: [],
         });
 
-        next(fixture, childSlug, {
+        next(fixture, childWtree, {
           step: "system_update",
           system_update: {
             schema_version: 1,
@@ -1509,14 +1509,14 @@ describe("loopo v3 child wtree integration", () => {
           },
         });
 
-        const archived = next(fixture, childSlug, {
+        const archived = next(fixture, childWtree, {
           step: "landing",
           status: "landed",
           summary: `${fileName} landed into parent`,
         });
         expectValidSchema(archived, "archive-output");
         expect(archived.step).toBe("archived");
-        expect((archived as any).landing.target_branch).toBe(slug);
+        expect((archived as any).landing.target_branch).toBe(wtree);
         expect((archived as any).landing.target_worktree).toBe(parentWorktree);
         expect(existsSync(join(parentWorktree, fileName))).toBe(true);
         if (String((archived as any).landing.strategy) === "fast-forward") {
@@ -1535,7 +1535,7 @@ describe("loopo v3 child wtree integration", () => {
       const alphaArchived = runChildLifecycle(children[0], "alpha.txt", "Build alpha slice");
       expect((alphaArchived as any).landing.strategy).toBe("fast-forward");
 
-      next(fixture, slug, {
+      next(fixture, wtree, {
         step: "child_result",
         task_id: String(children[0].task_id),
         child_wtree: String(children[0].child_wtree),
@@ -1547,7 +1547,7 @@ describe("loopo v3 child wtree integration", () => {
       const betaArchived = runChildLifecycle(children[1], "beta.txt", "Build beta slice");
       expect((betaArchived as any).landing.strategy).toBe("merge-commit");
 
-      const validating = next(fixture, slug, {
+      const validating = next(fixture, wtree, {
         step: "child_result",
         task_id: String(children[1].task_id),
         child_wtree: String(children[1].child_wtree),
@@ -1561,13 +1561,13 @@ describe("loopo v3 child wtree integration", () => {
       expect(existsSync(join(parentWorktree, "alpha.txt"))).toBe(true);
       expect(existsSync(join(parentWorktree, "beta.txt"))).toBe(true);
 
-      next(fixture, slug, {
+      next(fixture, wtree, {
         step: "validation",
         status: "passed",
         checks: [{ name: "parent-merge-smoke", status: "passed" }],
       });
 
-      next(fixture, slug, {
+      next(fixture, wtree, {
         step: "verification",
         status: "passed",
         acceptance_trace: [
@@ -1577,7 +1577,7 @@ describe("loopo v3 child wtree integration", () => {
         risks: [],
       });
 
-      next(fixture, slug, {
+      next(fixture, wtree, {
         step: "system_update",
         system_update: {
           schema_version: 1,
@@ -1585,7 +1585,7 @@ describe("loopo v3 child wtree integration", () => {
         },
       });
 
-      const rootArchived = next(fixture, slug, {
+      const rootArchived = next(fixture, wtree, {
         step: "landing",
         status: "landed",
         summary: "parent branch landed into main",
@@ -1602,7 +1602,7 @@ describe("loopo v3 child wtree integration", () => {
 
       const rootState = parseTasksYaml(
         readFileSync(
-          join(fixture.repo, ".loopo", "quests", slug, "tasks.yaml"),
+          join(fixture.repo, ".loopo", "quests", wtree, "tasks.yaml"),
           "utf8",
         ),
       ) as any;

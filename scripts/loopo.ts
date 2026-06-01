@@ -46,13 +46,13 @@ import {
   LOOPO_ROOT_MANIFEST_FILE,
   parseTasksYaml,
   taskAssignmentBranchRef,
-  taskAssignmentChildSlug,
+  taskAssignmentChildWtree,
   taskAssignmentWorktreePath,
   type QuestFiles,
   type QuestTask,
   questFiles,
   resolveGlobalLoopoBinPath,
-  slugify,
+  normalizeName,
   updateQuestStage,
   verifyQuestManifest,
   verifyRootManifest,
@@ -288,8 +288,6 @@ function parseInitArgs(argv: string[]): {
     else if (arg?.startsWith("--repo=")) repo = arg.slice("--repo=".length);
     else if (arg === "--cwd" || arg?.startsWith("--cwd=")) {
       throw new Error("loopo init no longer accepts --cwd; run it from the repo root or pass --repo");
-    } else if (arg === "--slug" || arg?.startsWith("--slug=")) {
-      throw new Error("loopo init no longer accepts --slug; use --wtree for an explicit base worktree name");
     } else if (arg === "--session" || arg?.startsWith("--session=")) {
       throw new Error("loopo init no longer accepts --session");
     } else if (arg === "--wtree") wtree = argv[++i] ?? null;
@@ -726,41 +724,41 @@ function readHookJsonArg(json: string | null): Record<string, any> {
   return readStdinJson() as Record<string, any>;
 }
 
-function questBySlug(
+function questByWtree(
   repoRoot: string,
-  slug: string,
+  wtree: string,
 ): { files: QuestFiles; state: Partial<{ [key: string]: any }> } | null {
-  const files = questFiles(repoRoot, slug);
+  const files = questFiles(repoRoot, wtree);
   if (!existsSync(files.tasks)) return null;
   return { files, state: parseTasksYaml(readText(files.tasks)) };
 }
 
-function allQuestSlugs(repoRoot: string): string[] {
+function allQuestWtrees(repoRoot: string): string[] {
   const questsDir = resolve(repoRoot, ".loopo", "quests");
   if (!existsSync(questsDir)) return [];
   return readdirSync(questsDir)
-    .filter((slug) => existsSync(questFiles(repoRoot, slug).tasks))
+    .filter((wtree) => existsSync(questFiles(repoRoot, wtree).tasks))
     .sort();
 }
 
 function findParentQuestAssignment(
   repoRoot: string,
-  childSlug: string,
+  childWtree: string,
 ): ParentQuestAssignment | null {
-  for (const parentSlug of allQuestSlugs(repoRoot)) {
-    const parentQuest = questBySlug(repoRoot, parentSlug);
+  for (const parentWtree of allQuestWtrees(repoRoot)) {
+    const parentQuest = questByWtree(repoRoot, parentWtree);
     const parentTasks = Array.isArray(parentQuest?.state.tasks)
       ? (parentQuest!.state.tasks as QuestTask[])
       : [];
     const matched = parentTasks.find(
       (task) =>
-        String(task.child_wtree ?? "").trim() === childSlug ||
-        taskAssignmentChildSlug(parentSlug, String(task.id)) === childSlug ||
-        `${parentSlug}-${task.id}` === childSlug,
+        String(task.child_wtree ?? "").trim() === childWtree ||
+        taskAssignmentChildWtree(parentWtree, String(task.id)) === childWtree ||
+        `${parentWtree}-${task.id}` === childWtree,
     );
     if (!matched) continue;
     return {
-      parent_wtree: parentSlug,
+      parent_wtree: parentWtree,
       task_id: matched.id,
       landing_target_branch: String(
         matched.merge_target || parentQuest?.state.coordinator_branch || "main",
@@ -793,19 +791,19 @@ function rankQuestCandidates(
   request: string,
 ): Array<Record<string, unknown>> {
   const tokens = requestTokens(request);
-  return allQuestSlugs(repoRoot)
-    .map((slug) => {
-      const quest = questBySlug(repoRoot, slug);
+  return allQuestWtrees(repoRoot)
+    .map((wtree) => {
+      const quest = questByWtree(repoRoot, wtree);
       const prompt = String(quest?.state.prompt ?? "");
-      const haystack = requestTokens(`${slug} ${prompt}`);
+      const haystack = requestTokens(`${wtree} ${prompt}`);
       let score = 0;
       for (const token of tokens) {
         if (haystack.has(token)) score += 1;
       }
       return {
-        wtree: slug,
+        wtree,
         score,
-        description: prompt || slug,
+        description: prompt || wtree,
         state: String(quest?.state.stage ?? "unknown"),
         current_step: stageToV3Step(
           String(quest?.state.stage ?? "planning"),
@@ -818,7 +816,7 @@ function rankQuestCandidates(
           "quest",
           "next",
           "--wtree",
-          slug,
+          wtree,
           "--json",
           "@-",
         ]),
@@ -830,8 +828,8 @@ function rankQuestCandidates(
     });
 }
 
-function suggestedSlug(request: string): string {
-  return slugify(request.replace(/^loopo:\s*/i, "") || "quest");
+function suggestedWtree(request: string): string {
+  return normalizeName(request.replace(/^loopo:\s*/i, "") || "quest");
 }
 
 function validWtreeName(value: string): boolean {
@@ -886,7 +884,7 @@ function v3InitRoute(input: {
   wtree?: string | null;
 }): Record<string, unknown> {
   const wtree = requireWtreeName(
-    String(input.wtree ?? "").trim() || suggestedSlug(input.request),
+    String(input.wtree ?? "").trim() || suggestedWtree(input.request),
   );
   const flow = loadFlowDefinition(input.flowId);
   const createQuestInput = {
@@ -921,8 +919,8 @@ function v3InitRoute(input: {
   };
 }
 
-function lockPath(repoRoot: string, slug: string): string {
-  return resolve(repoRoot, ".loopo", "locks", `${slug}.json`);
+function lockPath(repoRoot: string, wtree: string): string {
+  return resolve(repoRoot, ".loopo", "locks", `${wtree}.json`);
 }
 
 function pidAlive(pid: number): boolean {
@@ -935,19 +933,19 @@ function pidAlive(pid: number): boolean {
   }
 }
 
-type SlugLock =
+type WtreeLock =
   | { ok: true; path: string; token: string }
   | { ok: false; response: Record<string, unknown> };
 
-function acquireSlugLock(repoRoot: string, slug: string): SlugLock {
-  const path = lockPath(repoRoot, slug);
+function acquireWtreeLock(repoRoot: string, wtree: string): WtreeLock {
+  const path = lockPath(repoRoot, wtree);
   mkdirSync(dirname(path), { recursive: true });
   const token = `${process.pid}-${Date.now()}-${Math.random()
     .toString(36)
     .slice(2, 8)}`;
   const body = {
     schema_version: 3,
-    slug,
+    wtree,
     pid: process.pid,
     token,
     created_at: new Date().toISOString(),
@@ -973,7 +971,7 @@ function acquireSlugLock(repoRoot: string, slug: string): SlugLock {
           schema_version: 3,
           kind: "lock_error",
           schema_path: v3SchemaPath("lock-error"),
-          wtree: slug,
+          wtree,
           lock: {
             path,
             pid,
@@ -981,7 +979,7 @@ function acquireSlugLock(repoRoot: string, slug: string): SlugLock {
               "quest",
               "next",
               "--wtree",
-              slug,
+              wtree,
               "--json",
               "@-",
             ]),
@@ -996,13 +994,13 @@ function acquireSlugLock(repoRoot: string, slug: string): SlugLock {
       schema_version: 3,
       kind: "lock_error",
       schema_path: v3SchemaPath("lock-error"),
-      wtree: slug,
+      wtree,
       lock: { path, pid: null, retry: "stale lock could not be reaped" },
     },
   };
 }
 
-function releaseSlugLock(lock: SlugLock): void {
+function releaseWtreeLock(lock: WtreeLock): void {
   if (!lock.ok) return;
   try {
     const current = readJson(lock.path) as Record<string, any> | null;
@@ -1014,7 +1012,7 @@ function releaseSlugLock(lock: SlugLock): void {
 
 function readyChildrenForV3(
   repoRoot: string,
-  slug: string,
+  wtree: string,
   state: Partial<{ tasks: QuestTask[] }>,
   full = false,
 ): Array<Record<string, unknown>> {
@@ -1022,22 +1020,22 @@ function readyChildrenForV3(
   const flowId = flowIdForState(state as Partial<{ [key: string]: any }>);
   const runtime = inferRepoRuntime(repoRoot);
   return readyChildTasks(state).map((task) => {
-    const childSlug =
+    const childWtree =
       String(task.child_wtree || "").trim() ||
-      taskAssignmentChildSlug(slug, String(task.id));
+      taskAssignmentChildWtree(wtree, String(task.id));
     const workspace = ensureTaskWorkspace(
       repoRoot,
-      String(task.branch_ref || taskAssignmentBranchRef(slug, String(task.id))),
+      String(task.branch_ref || taskAssignmentBranchRef(wtree, String(task.id))),
       String(
         task.worktree_path ||
-          taskAssignmentWorktreePath(repoRoot, slug, String(task.id)),
+          taskAssignmentWorktreePath(repoRoot, wtree, String(task.id)),
       ),
     );
     const request = `loopo: execute child task ${task.id}: ${task.title}`;
     return {
       task_id: task.id,
       title: task.title,
-      child_wtree: childSlug,
+      child_wtree: childWtree,
       branch_ref: workspace.branch_ref,
       worktree_path: workspace.worktree_path,
       acceptance: task.acceptance,
@@ -1046,7 +1044,7 @@ function readyChildrenForV3(
           "init",
           request,
           "--wtree",
-          childSlug,
+          childWtree,
           "--runtime",
           runtime,
           "--flow",
@@ -1056,7 +1054,7 @@ function readyChildrenForV3(
           "quest",
           "next",
           "--wtree",
-          childSlug,
+          childWtree,
           "--json",
           "@-",
         ]),
@@ -1115,7 +1113,7 @@ function v3StepOutput(input: {
     "quest",
     "next",
     "--wtree",
-    input.files.slug,
+    input.files.wtree,
     "--json",
     "@-",
   ];
@@ -1130,7 +1128,7 @@ function v3StepOutput(input: {
     if (step === "executing") {
       compactOutput.children = readyChildrenForV3(
         input.repoRoot,
-        input.files.slug,
+        input.files.wtree,
         input.state,
       );
     }
@@ -1150,7 +1148,7 @@ function v3StepOutput(input: {
     schema_version: 3,
     kind: "quest_step",
     schema_path: v3SchemaPath(schema),
-    wtree: input.files.slug,
+    wtree: input.files.wtree,
     flow_id: flow.id,
     flow_version: flow.version,
     step,
@@ -1162,7 +1160,7 @@ function v3StepOutput(input: {
     },
   };
   if (input.full) {
-    output.quest_id = input.files.slug;
+    output.quest_id = input.files.wtree;
     output.allowed_transitions = flowStage(flow, stage).transitions;
     output.context = {
       step: stepContextData(stepDef),
@@ -1190,7 +1188,7 @@ function v3StepOutput(input: {
   if (step === "executing") {
     output.children = readyChildrenForV3(
       input.repoRoot,
-      input.files.slug,
+      input.files.wtree,
       input.state,
       input.full === true,
     );
@@ -1259,7 +1257,7 @@ function appendV3Event(
 ): void {
   appendJsonl(files.handoffs, {
     event,
-    quest_id: files.slug,
+    quest_id: files.wtree,
     payload,
   });
 }
@@ -1330,13 +1328,13 @@ function handlePlan(input: {
   const questions = asArray(input.payload.questions);
   appendJsonl(input.files.plans, {
     event: "plan",
-    quest_id: input.files.slug,
+    quest_id: input.files.wtree,
     payload: input.payload,
   });
   if (questions.length) {
     appendJsonl(input.files.questions, {
       event: "question_round",
-      quest_id: input.files.slug,
+      quest_id: input.files.wtree,
       questions,
     });
     return updateQuestStage(
@@ -1372,7 +1370,7 @@ function handleQuestions(input: {
   }
   appendJsonl(input.files.questions, {
     event: "answers",
-    quest_id: input.files.slug,
+    quest_id: input.files.wtree,
     answers: input.payload.answers,
   });
   return updateQuestStage(
@@ -1387,7 +1385,7 @@ function taskById(
   state: Partial<{ tasks: QuestTask[] }>,
   taskId: string,
 ): QuestTask | null {
-  const normalized = slugify(taskId);
+  const normalized = normalizeName(taskId);
   const tasks = Array.isArray(state.tasks) ? state.tasks : [];
   return tasks.find((task) => task.id === normalized) ?? null;
 }
@@ -1534,14 +1532,14 @@ function gitMergeIntoBranch(
 
 function resolveQuestLandingContext(input: {
   repoRoot: string;
-  slug: string;
+  wtree: string;
   state: Partial<{ [key: string]: any }>;
 }): {
-  parentQuestSlug: string;
+  parentWtree: string;
   landingTargetBranch: string;
   landingTargetWorktree: string;
 } {
-  const parentQuestSlug = String(input.state.parent_wtree ?? "").trim();
+  const parentWtree = String(input.state.parent_wtree ?? "").trim();
   const landingTargetBranch = String(
     input.state.landing_target_branch ?? "",
   ).trim();
@@ -1550,7 +1548,7 @@ function resolveQuestLandingContext(input: {
   ).trim();
   if (landingTargetBranch) {
     return {
-      parentQuestSlug,
+      parentWtree,
       landingTargetBranch,
       landingTargetWorktree:
         landingTargetWorktree ||
@@ -1558,17 +1556,17 @@ function resolveQuestLandingContext(input: {
     };
   }
   if (isChildExecutionQuestPrompt(input.state.prompt)) {
-    const parent = findParentQuestAssignment(input.repoRoot, input.slug);
+    const parent = findParentQuestAssignment(input.repoRoot, input.wtree);
     if (parent) {
       return {
-        parentQuestSlug: parent.parent_wtree,
+        parentWtree: parent.parent_wtree,
         landingTargetBranch: parent.landing_target_branch,
         landingTargetWorktree: parent.landing_target_worktree,
       };
     }
   }
   return {
-    parentQuestSlug: "",
+    parentWtree: "",
     landingTargetBranch: "main",
     landingTargetWorktree: landingTargetWorktreePath(input.repoRoot, "main"),
   };
@@ -1657,15 +1655,15 @@ function handleChildResult(input: {
       `child_result cannot update already completed task: ${task.id}`,
     );
   }
-  const payloadChildSlug = String(input.payload.child_wtree ?? "").trim();
-  if (task.child_wtree.trim() && payloadChildSlug !== task.child_wtree.trim()) {
+  const payloadChildWtree = String(input.payload.child_wtree ?? "").trim();
+  if (task.child_wtree.trim() && payloadChildWtree !== task.child_wtree.trim()) {
     throw new Error(
       `child_result child_wtree must match planned child wtree ${task.child_wtree}`,
     );
   }
   if (status === "passed") {
     const childQuest = task.child_wtree.trim()
-      ? questBySlug(input.repoRoot, task.child_wtree.trim())
+      ? questByWtree(input.repoRoot, task.child_wtree.trim())
       : null;
     if (childQuest) {
       const childStage = String(childQuest.state.stage ?? "");
@@ -1681,10 +1679,10 @@ function handleChildResult(input: {
     child_wtree: String(input.payload.child_wtree),
     branch_ref: String(input.payload.branch_ref ?? input.payload.child_wtree),
     worktree_path: String(input.payload.worktree_path ?? ""),
-    merge_target: input.files.slug,
+    merge_target: input.files.wtree,
     merge_lease_id: String(
       input.payload.merge_lease_id ??
-        `lease-${input.files.slug}-${input.payload.task_id}`,
+        `lease-${input.files.wtree}-${input.payload.task_id}`,
     ),
     merge_commit: String(input.payload.merge_commit ?? ""),
   };
@@ -1697,7 +1695,7 @@ function handleChildResult(input: {
         });
   appendJsonl(input.files.evidence, {
     event: "child_result",
-    quest_id: input.files.slug,
+    quest_id: input.files.wtree,
     payload: input.payload,
   });
   if (allTasksDone(next)) {
@@ -1723,7 +1721,7 @@ function handleValidation(input: {
   }
   appendJsonl(input.files.validation, {
     event: "validation",
-    quest_id: input.files.slug,
+    quest_id: input.files.wtree,
     payload: input.payload,
   });
   return updateQuestStage(
@@ -1748,7 +1746,7 @@ function handleVerification(input: {
   }
   appendJsonl(input.files.review, {
     event: "verification",
-    quest_id: input.files.slug,
+    quest_id: input.files.wtree,
     payload: input.payload,
   });
   return updateQuestStage(
@@ -1770,7 +1768,7 @@ function handleSystemUpdate(input: {
   }
   appendJsonl(input.files.review, {
     event: "system_update",
-    quest_id: input.files.slug,
+    quest_id: input.files.wtree,
     payload: input.payload,
   });
   applySystemUpdate(
@@ -1813,9 +1811,9 @@ function handleLanding(input: {
     }
     const unresolvedChildren = tasks.filter((task) => {
       if (!CHILD_DONE_STATUSES.has(task.status)) return false;
-      const slug = String(task.child_wtree ?? "").trim();
-      if (!slug) return false;
-      const childQuest = questBySlug(input.repoRoot, slug);
+      const childWtree = String(task.child_wtree ?? "").trim();
+      if (!childWtree) return false;
+      const childQuest = questByWtree(input.repoRoot, childWtree);
       return childQuest != null && String(childQuest.state.stage ?? "") !== "archived";
     });
     if (unresolvedChildren.length) {
@@ -1849,7 +1847,7 @@ function handleLanding(input: {
     }
     const landingContext = resolveQuestLandingContext({
       repoRoot: input.repoRoot,
-      slug: input.files.slug,
+      wtree: input.files.wtree,
       state: currentState,
     });
     landingReceipt = gitMergeIntoBranch(
@@ -1859,7 +1857,7 @@ function handleLanding(input: {
       landingContext.landingTargetWorktree,
     );
     applyLandingReceipt(input.files, currentState, {
-      parent_wtree: landingContext.parentQuestSlug,
+      parent_wtree: landingContext.parentWtree,
       landing_target_branch: landingReceipt.target_branch,
       landing_target_worktree: landingReceipt.target_worktree,
       landed_commit: landingReceipt.landed_commit,
@@ -1930,9 +1928,9 @@ function saveHookRuntimeState(repoRoot: string, state: HookRuntimeState): void {
 function hookChainKey(
   runtime: Runtime,
   contextRoot: string,
-  slug: string,
+  wtree: string,
 ): string {
-  return hashText([runtime, contextRoot, slug].join("\n"));
+  return hashText([runtime, contextRoot, wtree].join("\n"));
 }
 
 function rememberHookKey(chain: HookChainState, key: string): void {
@@ -2058,8 +2056,6 @@ function parseQuestRepoArg(argv: string[]): {
     else if (arg?.startsWith("--repo=")) repo = arg.slice("--repo=".length);
     else if (arg === "--cwd" || arg?.startsWith("--cwd=")) {
       throw new Error("loopo no longer accepts --cwd; use --wtree and run from a repo/worktree context");
-    } else if (arg === "--slug" || arg?.startsWith("--slug=")) {
-      throw new Error("loopo no longer accepts --slug; use --wtree");
     } else if (arg === "--session" || arg?.startsWith("--session=")) {
       throw new Error("loopo no longer accepts --session; use --wtree");
     } else if (arg === "--wtree") wtree = argv[++i] ?? null;
@@ -2077,7 +2073,7 @@ function parseQuestRepoArg(argv: string[]): {
 
 function createV3Quest(input: {
   repoRoot: string;
-  slug: string;
+  wtree: string;
   request: string;
   resolutionSource: string;
   flowId: string;
@@ -2085,9 +2081,9 @@ function createV3Quest(input: {
   ensureSystemScaffold(input.repoRoot);
   ensureGitRootCommit(input.repoRoot);
   const flow = loadFlowDefinition(input.flowId);
-  const workspace = ensureCoordinatorWorkspace(input.repoRoot, input.slug);
+  const workspace = ensureCoordinatorWorkspace(input.repoRoot, input.wtree);
   const parentAssignment = isChildExecutionQuestPrompt(input.request)
-    ? findParentQuestAssignment(input.repoRoot, input.slug)
+    ? findParentQuestAssignment(input.repoRoot, input.wtree)
     : null;
   const landingTargetBranch = parentAssignment
     ? parentAssignment.landing_target_branch
@@ -2097,13 +2093,13 @@ function createV3Quest(input: {
     : landingTargetWorktreePath(input.repoRoot, landingTargetBranch);
   const { files, state } = createQuest({
     repoRoot: input.repoRoot,
-    slug: input.slug,
+    wtree: input.wtree,
     prompt: input.request,
     resolutionSource: input.resolutionSource,
     workspace,
     flowId: flow.id,
     flowVersion: flow.version,
-    parentQuestSlug: parentAssignment?.parent_wtree ?? "",
+    parentWtree: parentAssignment?.parent_wtree ?? "",
     landingTargetBranch,
     landingTargetWorktree,
   });
@@ -2201,9 +2197,9 @@ export function runQuestNextV3(argv: string[]): number {
     repo: args.repo,
     payload,
   });
-  let slug: string;
+  let wtree: string;
   try {
-    slug = requireWtreeName(String(args.wtree ?? payload.wtree ?? "").trim());
+    wtree = requireWtreeName(String(args.wtree ?? payload.wtree ?? "").trim());
   } catch (error) {
     questResponse(
       v3Error(
@@ -2214,19 +2210,19 @@ export function runQuestNextV3(argv: string[]): number {
     );
     return 1;
   }
-  const lock = acquireSlugLock(context.repoRoot, slug);
+  const lock = acquireWtreeLock(context.repoRoot, wtree);
   if (!lock.ok) {
     questResponse(lock.response);
     return 2;
   }
   try {
-    const existing = questBySlug(context.repoRoot, slug);
+    const existing = questByWtree(context.repoRoot, wtree);
     if (!existing) {
       const stepError = assertStep(payload, "select_quest");
       if (stepError) {
         questResponse(
           v3Error("quest does not exist; create it with select_quest input", {
-            wtree: slug,
+            wtree,
             expected_callback_schema: embeddedCallbackSchema("next-input"),
           }),
         );
@@ -2236,7 +2232,7 @@ export function runQuestNextV3(argv: string[]): number {
       if (schemaErrors.length) {
         questResponse(
           v3Error("callback schema validation failed", {
-            wtree: slug,
+            wtree,
             schema: v3SchemaRef("next-input"),
             errors: schemaErrors,
           }),
@@ -2245,23 +2241,23 @@ export function runQuestNextV3(argv: string[]): number {
       }
       if (String(payload.action ?? "") !== "create_quest") {
         questResponse(
-          v3Error("select_quest action must be create_quest", { wtree: slug }),
+          v3Error("select_quest action must be create_quest", { wtree }),
         );
         return 1;
       }
-      if (payload.wtree && String(payload.wtree) !== slug) {
-        questResponse(v3Error("payload wtree does not match --wtree", { wtree: slug }));
+      if (payload.wtree && String(payload.wtree) !== wtree) {
+        questResponse(v3Error("payload wtree does not match --wtree", { wtree }));
         return 1;
       }
       const request = String(payload.request ?? "").trim();
       if (!request) {
-        questResponse(v3Error("create_quest requires request", { wtree: slug }));
+        questResponse(v3Error("create_quest requires request", { wtree }));
         return 1;
       }
       const flowId = String(payload.flow_id ?? DEFAULT_FLOW_ID).trim();
       const created = createV3Quest({
         repoRoot: context.repoRoot,
-        slug,
+        wtree,
         request,
         resolutionSource: context.source,
         flowId: flowId || DEFAULT_FLOW_ID,
@@ -2290,7 +2286,7 @@ export function runQuestNextV3(argv: string[]): number {
     if (!manifestCheck.ok) {
       questResponse(
         v3Error("quest manifest verification failed", {
-          wtree: slug,
+          wtree,
           errors: manifestCheck.errors,
         }),
       );
@@ -2305,13 +2301,13 @@ export function runQuestNextV3(argv: string[]): number {
       const expected = stageInputStep(currentStage, flow);
       const stepError = assertStep(payload, expected);
       if (stepError) {
-        questResponse(v3Error(stepError, { wtree: slug, state: state.stage }));
+        questResponse(v3Error(stepError, { wtree, state: state.stage }));
         return 1;
       }
       const schemaName = inputSchemaForStage(currentStage, flow);
       if (!schemaName) {
         questResponse(
-          v3Error("current step does not accept a callback payload", { wtree: slug }),
+          v3Error("current step does not accept a callback payload", { wtree }),
         );
         return 1;
       }
@@ -2319,7 +2315,7 @@ export function runQuestNextV3(argv: string[]): number {
       if (schemaErrors.length) {
         questResponse(
           v3Error("callback schema validation failed", {
-            wtree: slug,
+            wtree,
             state: state.stage,
             schema: v3SchemaRef(schemaName),
             errors: schemaErrors,
@@ -2327,7 +2323,7 @@ export function runQuestNextV3(argv: string[]): number {
         );
         return 1;
       }
-      const requestId = `next-${slug}-${Date.now().toString(36)}`;
+      const requestId = `next-${wtree}-${Date.now().toString(36)}`;
       try {
         if (expected === "plan") {
           state = handlePlan({
@@ -2388,7 +2384,7 @@ export function runQuestNextV3(argv: string[]): number {
       } catch (error) {
         questResponse(
           v3Error(error instanceof Error ? error.message : String(error), {
-            wtree: slug,
+            wtree,
             state: state.stage,
           }),
         );
@@ -2407,7 +2403,7 @@ export function runQuestNextV3(argv: string[]): number {
     );
     return 0;
   } finally {
-    releaseSlugLock(lock);
+    releaseWtreeLock(lock);
   }
 }
 
@@ -2466,14 +2462,14 @@ export function runHook(argv: string[]): number {
   const chainKey = hookChainKey(
     runtime,
     context.repoRoot,
-    activeQuest.files.slug,
+    activeQuest.files.wtree,
   );
   const chain = (chainState.chains[chainKey] ??= {});
   const duplicateKey = [
     runtime,
     eventName,
     context.repoRoot,
-    activeQuest.files.slug,
+    activeQuest.files.wtree,
     latestStop.iteration,
     snapshot,
   ].join("\n");
@@ -2528,7 +2524,7 @@ export function runHook(argv: string[]): number {
   const budgetReason = JSON.stringify({
     loopo: true,
     command: "quest.next",
-    wtree: activeQuest.files.slug,
+    wtree: activeQuest.files.wtree,
     step: stageToV3Step(stage, loadStateFlow(activeQuest.state)),
     stop_reason: "budget_exhausted",
     summary:

@@ -109,8 +109,6 @@ function parseArgs(argv: string[]): SimArgs {
     else if (arg?.startsWith("--repo=")) repo = arg.slice("--repo=".length);
     else if (arg === "--cwd" || arg?.startsWith("--cwd=")) {
       throw new Error("loopo sim no longer accepts --cwd; use --repo or run from the repo root");
-    } else if (arg === "--slug" || arg?.startsWith("--slug=")) {
-      throw new Error("loopo sim no longer accepts --slug; use --wtree");
     } else if (arg === "--wtree") wtree = body[++i] ?? null;
     else if (arg?.startsWith("--wtree=")) wtree = arg.slice("--wtree=".length);
     else if (arg === "--runtime") runtime = body[++i] ?? null;
@@ -244,13 +242,13 @@ function runLoopo(
   });
 }
 
-function questState(repoRoot: string, slug: string): QuestLikeState {
-  const files = questFiles(repoRoot, slug);
+function questState(repoRoot: string, wtree: string): QuestLikeState {
+  const files = questFiles(repoRoot, wtree);
   return parseTasksYaml(readText(files.tasks)) as QuestLikeState;
 }
 
-function currentFlowStepId(repoRoot: string, slug: string): string {
-  const state = questState(repoRoot, slug);
+function currentFlowStepId(repoRoot: string, wtree: string): string {
+  const state = questState(repoRoot, wtree);
   const flowId = String(state.flow_id ?? DEFAULT_FLOW_ID).trim() || DEFAULT_FLOW_ID;
   return flowStep(loadFlowDefinition(flowId), String(state.stage ?? "")).id;
 }
@@ -268,13 +266,13 @@ function simCommand(args: string[]): Record<string, unknown> {
   return { cmd: "loopo", args };
 }
 
-function simNextCommand(repoRoot: string, slug: string): Record<string, unknown> {
+function simNextCommand(repoRoot: string, wtree: string): Record<string, unknown> {
   return simCommand([
     "sim",
     "quest",
     "next",
     "--wtree",
-    slug,
+    wtree,
     "--json",
     "@-",
   ]);
@@ -282,11 +280,11 @@ function simNextCommand(repoRoot: string, slug: string): Record<string, unknown>
 
 function withGuidedEnvelope(input: {
   repoRoot: string;
-  slug: string;
+  wtree: string;
   runtime: Runtime;
   output: Record<string, unknown>;
 }): Record<string, unknown> {
-  const state = questState(input.repoRoot, input.slug);
+  const state = questState(input.repoRoot, input.wtree);
   const stage = String(state.stage ?? "");
   const flowId = String(state.flow_id ?? DEFAULT_FLOW_ID).trim() || DEFAULT_FLOW_ID;
   const originalCommands =
@@ -300,13 +298,13 @@ function withGuidedEnvelope(input: {
     runtime: input.runtime,
     request: String(state.prompt ?? ""),
     flow_id: flowId,
-    wtree: input.slug,
+    wtree: input.wtree,
     current_stage: stage,
     done: stage === "archived",
     ...input.output,
     commands: {
       ...originalCommands,
-      next: simNextCommand(input.repoRoot, input.slug),
+      next: simNextCommand(input.repoRoot, input.wtree),
     },
   };
 }
@@ -340,7 +338,7 @@ function routeSimQuestInit(input: {
   request: string;
   flowId: string;
   wtree: string | null;
-}): { slug: string; createOutput: Record<string, unknown> } {
+}): { wtree: string; createOutput: Record<string, unknown> } {
   const initArgs = [
     "init",
     input.request,
@@ -359,8 +357,8 @@ function routeSimQuestInit(input: {
     route.new_quest && typeof route.new_quest === "object"
       ? (route.new_quest as Record<string, unknown>)
       : {};
-  const slug = String(newQuest.suggested_wtree ?? "").trim();
-  if (!slug) fail(`missing wtree in init output: ${init.stdout}`);
+  const wtree = String(newQuest.suggested_wtree ?? "").trim();
+  if (!wtree) fail(`missing wtree in init output: ${init.stdout}`);
   const createInput =
     newQuest.input && typeof newQuest.input === "object"
       ? (newQuest.input as Record<string, unknown>)
@@ -372,7 +370,7 @@ function routeSimQuestInit(input: {
       "quest",
       "next",
       "--wtree",
-      slug,
+      wtree,
       "--json",
       "@-",
     ],
@@ -382,7 +380,7 @@ function routeSimQuestInit(input: {
     fail(routeProc.stderr || routeProc.stdout || "new_quest.command failed");
   }
   return {
-    slug,
+    wtree,
     createOutput: parseJsonText(routeProc.stdout, "route output"),
   };
 }
@@ -418,7 +416,7 @@ function runSimInit(args: SimArgs): number {
     JSON.stringify(
       withGuidedEnvelope({
         repoRoot,
-        slug: started.slug,
+        wtree: started.wtree,
         runtime,
         output: started.createOutput,
       }),
@@ -433,8 +431,8 @@ function runSimQuestNext(args: SimArgs): number {
   if (!args.json) {
     throw new Error("sim quest next requires --json <json|@file|@->");
   }
-  const slug = String(args.wtree ?? "").trim();
-  if (!slug) {
+  const wtree = String(args.wtree ?? "").trim();
+  if (!wtree) {
     throw new Error("sim quest next requires --wtree <name>");
   }
   const payload = readJsonArg(args.json);
@@ -442,15 +440,15 @@ function runSimQuestNext(args: SimArgs): number {
     throw new Error("sim quest next requires a non-empty JSON payload");
   }
   const repoRoot = resolveRepoRoot(args.repo, payload);
-  if (!existsSync(questFiles(repoRoot, slug).tasks)) {
-    throw new Error(`missing quest state for simulated quest: ${slug}`);
+  if (!existsSync(questFiles(repoRoot, wtree).tasks)) {
+    throw new Error(`missing quest state for simulated quest: ${wtree}`);
   }
-  currentFlowStepId(repoRoot, slug);
+  currentFlowStepId(repoRoot, wtree);
   const questArgs = [
     "quest",
     "next",
     "--wtree",
-    slug,
+    wtree,
     "--json",
     "@-",
   ];
@@ -469,7 +467,7 @@ function runSimQuestNext(args: SimArgs): number {
     JSON.stringify(
       withGuidedEnvelope({
         repoRoot,
-        slug,
+        wtree,
         runtime,
         output,
       }),

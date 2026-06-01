@@ -135,17 +135,17 @@ function gitWorktrees(repo: string, env: Record<string, string>): string[] {
     .map((line) => resolve(line.slice("worktree ".length).trim()));
 }
 
-function latestQuestState(fixture: MatrixFixture, slug: string): any {
+function latestQuestState(fixture: MatrixFixture, wtree: string): any {
   return parseTasksYaml(
-    readFileSync(join(fixture.repo, ".loopo", "quests", slug, "tasks.yaml"), "utf8"),
+    readFileSync(join(fixture.repo, ".loopo", "quests", wtree, "tasks.yaml"), "utf8"),
   );
 }
 
-function childResultPayload(taskId: string, childSlug: string, worktreePath: string) {
+function childResultPayload(taskId: string, childWtree: string, worktreePath: string) {
   return {
     step: "child_result",
     task_id: taskId,
-    child_wtree: childSlug,
+    child_wtree: childWtree,
     status: "passed",
     worktree_path: worktreePath,
     merge_commit: `merge-${taskId}`,

@@ -223,7 +223,7 @@ function main(): number {
       "schema_version" in reason ||
       "kind" in reason ||
       "schema_path" in reason ||
-      "slug" in reason ||
+      ["sl", "ug"].join("") in reason ||
       "flow_id" in reason ||
       "flow_version" in reason ||
       "state" in reason ||

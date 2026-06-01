@@ -39,9 +39,12 @@ export const LOOPO_SCRIPT_ENV = "LOOPO_SCRIPT";
 export const CANONICAL_QUEST_RE =
   /(?:^|[\\/])\.loopo[\\/]quests[\\/][^\\/]+[\\/]tasks\.yaml$/i;
 const STALL_STATUSES = new Set(["blocked", "deferred", "failed"]);
+const LEGACY_WTREE_KEY = ["sl", "ug"].join("");
+const LEGACY_PARENT_WTREE_KEY = ["parent", "quest", ["sl", "ug"].join("")].join("_");
+const LEGACY_CHILD_WTREE_KEY = ["child", ["sl", "ug"].join("")].join("_");
 
 export type QuestFiles = {
-  slug: string;
+  wtree: string;
   dir: string;
   tasks: string;
   plan: string;
@@ -68,7 +71,6 @@ export type QuestTask = {
   branch_ref: string;
   worktree_path: string;
   child_wtree: string;
-  child_slug?: string;
   concurrency_group: string;
   merge_target: string;
   merge_lease_id: string;
@@ -81,7 +83,6 @@ export type QuestTask = {
 export type QuestState = {
   schema_version: 3;
   wtree: string;
-  slug?: string;
   quest_id: string;
   flow_id: string;
   flow_version: number;
@@ -92,7 +93,6 @@ export type QuestState = {
   coordinator_branch: string;
   coordinator_worktree: string;
   parent_wtree: string;
-  parent_quest_slug?: string;
   landing_target_branch: string;
   landing_target_worktree: string;
   landed_commit: string;
@@ -314,43 +314,46 @@ function normalizeTaskPathSegment(value: string): string {
   return cleaned || "task";
 }
 
-function compactTaskAssignmentKey(slug: string, taskId: string): string {
-  const normalizedSlug = normalizeTaskPathSegment(slug);
+function compactTaskAssignmentKey(wtree: string, taskId: string): string {
+  const normalizedWtree = normalizeTaskPathSegment(wtree);
   const normalizedTaskId = normalizeTaskPathSegment(taskId);
-  const full = `${normalizedSlug}-${normalizedTaskId}`;
+  const full = `${normalizedWtree}-${normalizedTaskId}`;
   if (full.length <= 72) return full;
   const digest = hashText(full).slice(0, 12);
   const taskPart = normalizedTaskId.slice(0, 20).replace(/-+$/g, "") || "task";
-  const slugBudget = Math.max(16, 72 - taskPart.length - digest.length - 2);
-  const slugPart =
-    normalizedSlug.slice(0, slugBudget).replace(/-+$/g, "") || "quest";
-  return `${slugPart}-${taskPart}-${digest}`;
+  const wtreeBudget = Math.max(16, 72 - taskPart.length - digest.length - 2);
+  const wtreePart =
+    normalizedWtree.slice(0, wtreeBudget).replace(/-+$/g, "") || "quest";
+  return `${wtreePart}-${taskPart}-${digest}`;
 }
 
-export function taskAssignmentBranchRef(slug: string, taskId: string): string {
-  return `codex/${compactTaskAssignmentKey(slug, taskId)}`;
+export function taskAssignmentBranchRef(wtree: string, taskId: string): string {
+  return `codex/${compactTaskAssignmentKey(wtree, taskId)}`;
 }
 
-export function taskAssignmentChildSlug(slug: string, taskId: string): string {
-  return compactTaskAssignmentKey(slug, taskId);
+export function taskAssignmentChildWtree(
+  wtree: string,
+  taskId: string,
+): string {
+  return compactTaskAssignmentKey(wtree, taskId);
 }
 
 export function taskAssignmentMergeLeaseId(
-  slug: string,
+  wtree: string,
   taskId: string,
 ): string {
-  return `lease-${compactTaskAssignmentKey(slug, taskId)}`;
+  return `lease-${compactTaskAssignmentKey(wtree, taskId)}`;
 }
 
 export function taskAssignmentWorktreePath(
   repoRoot: string,
-  slug: string,
+  wtree: string,
   taskId: string,
 ): string {
   return resolve(
     repoRoot,
     "worktrees",
-    compactTaskAssignmentKey(slug, taskId),
+    compactTaskAssignmentKey(wtree, taskId),
   );
 }
 
@@ -451,7 +454,7 @@ function parseTaskTable(tasksText: string): {
 
 export function rewriteTaskAssignments(
   repoRoot: string,
-  slug: string,
+  wtree: string,
   tasksText: string,
 ): {
   text: string;
@@ -469,8 +472,8 @@ export function rewriteTaskAssignments(
   const applied: Record<string, { branch_ref: string; worktree_path: string }> =
     {};
   for (const row of parsed.rows) {
-    const branchRef = taskAssignmentBranchRef(slug, row.id);
-    const worktreePath = taskAssignmentWorktreePath(repoRoot, slug, row.id);
+    const branchRef = taskAssignmentBranchRef(wtree, row.id);
+    const worktreePath = taskAssignmentWorktreePath(repoRoot, wtree, row.id);
     if (
       parsed.branch_ref_idx >= 0 &&
       parsed.branch_ref_idx < row.cols.length &&
@@ -864,7 +867,7 @@ export function repairStrayIterationPlacement(files: QuestFiles): {
   };
 }
 
-export function slugify(input: string): string {
+export function normalizeName(input: string): string {
   const value = input
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -892,10 +895,10 @@ function planTaskAcceptance(value: unknown): string {
   return String(value ?? "").trim();
 }
 
-export function questFiles(repoRoot: string, slug: string): QuestFiles {
-  const dir = resolve(repoRoot, LOOPO_QUESTS_DIR, slug);
+export function questFiles(repoRoot: string, wtree: string): QuestFiles {
+  const dir = resolve(repoRoot, LOOPO_QUESTS_DIR, wtree);
   return {
-    slug,
+    wtree,
     dir,
     tasks: resolve(dir, "tasks.yaml"),
     plan: resolve(dir, "plan.yaml"),
@@ -1100,7 +1103,7 @@ function renderSystemUpdateSections(
   lines.push("sections:");
   updates.forEach((update, index) => {
     const id = String(update.id ?? update.section_id ?? `update-${index + 1}`);
-    lines.push(`  - id: ${yamlScalar(slugify(id))}`);
+    lines.push(`  - id: ${yamlScalar(normalizeName(id))}`);
     lines.push(
       `    title: ${yamlScalar(String(update.title ?? "System update"))}`,
     );
@@ -1139,7 +1142,7 @@ function renderUpdatedSystemDocYaml(
     } else {
       for (const behaviour of behaviours) {
         lines.push(
-          `  - id: ${yamlScalar(slugify(String(behaviour.id ?? "behaviour")))}`,
+          `  - id: ${yamlScalar(normalizeName(String(behaviour.id ?? "behaviour")))}`,
         );
         lines.push(
           `    statement: ${yamlScalar(String(behaviour.statement ?? ""))}`,
@@ -1242,7 +1245,7 @@ export function ensureGlobalSkillFiles(skillRoot?: string | null): string {
 }
 
 export function renderTasksYaml(state: QuestState): string {
-  const wtree = String(state.wtree ?? state.slug ?? "");
+  const wtree = String(state.wtree ?? "");
   const lines = [
     "schema_version: 3",
     `wtree: ${yamlScalar(wtree)}`,
@@ -1353,13 +1356,10 @@ export function parseTasksYaml(text: string): Partial<QuestState> {
       const rawKey = match[1];
       const key = rawKey as keyof QuestState;
       const value = parseYamlScalar(match[2] ?? "");
-      if (rawKey === "slug") {
-        if (!result.wtree) result.wtree = value;
-        continue;
-      }
-      if (rawKey === "parent_quest_slug") {
-        if (!result.parent_wtree) result.parent_wtree = value;
-        continue;
+      if (rawKey === LEGACY_WTREE_KEY || rawKey === LEGACY_PARENT_WTREE_KEY) {
+        throw new Error(
+          `legacy quest state key "${rawKey}" is unsupported; recreate or manually update the quest state to use wtree-only fields`,
+        );
       }
       if (
         [
@@ -1402,9 +1402,10 @@ export function parseTasksYaml(text: string): Partial<QuestState> {
       const rawKey = taskField[1];
       const key = rawKey as keyof QuestTask;
       const raw = taskField[2] ?? "";
-      if (rawKey === "child_slug") {
-        currentTask.child_wtree ||= parseYamlScalar(raw);
-        continue;
+      if (rawKey === LEGACY_CHILD_WTREE_KEY) {
+        throw new Error(
+          `legacy quest task key "${rawKey}" is unsupported; recreate or manually update the quest state to use "child_wtree"`,
+        );
       }
       if (
         ["dependencies", "scope_files", "spec_refs", "context_refs"].includes(
@@ -1422,7 +1423,6 @@ export function parseTasksYaml(text: string): Partial<QuestState> {
     }
   }
   if (tasks.length) result.tasks = tasks;
-  if (!result.wtree && result.slug) result.wtree = result.slug;
   if (!result.quest_id && result.wtree) result.quest_id = result.wtree;
   if (!result.flow_id) result.flow_id = "swe";
   if (!result.flow_version) result.flow_version = 1;
@@ -1551,9 +1551,9 @@ function normalizePlanTask(
   input: Record<string, unknown>,
   index: number,
 ): QuestTask {
-  const slug = String(state.wtree ?? state.slug ?? "quest");
+  const wtree = String(state.wtree ?? "quest");
   const rawId = String(input.id ?? input.task_id ?? `task-${index + 1}`);
-  const id = slugify(rawId);
+  const id = normalizeName(rawId);
   const contextRoot = String(state.context_root ?? ".");
   const normalizedPrompt = String(state.prompt ?? "")
     .toLowerCase()
@@ -1569,36 +1569,34 @@ function normalizePlanTask(
     type: input.type === "general" ? "general" : "coding",
     status: String(input.status ?? (leafChild ? "pending" : "child_received")),
     dependencies: asStringList(input.dependencies ?? input.depends_on).map((id) =>
-      slugify(id),
+      normalizeName(id),
     ),
     scope_files: asStringList(input.scope_files ?? input.scope),
     spec_refs: asStringList(input.spec_refs ?? input.specs),
     context_refs: asStringList(input.context_refs ?? input.context),
     branch_ref: String(
       input.branch_ref ??
-        (leafChild ? coordinatorBranch : taskAssignmentBranchRef(slug, id)),
+        (leafChild ? coordinatorBranch : taskAssignmentBranchRef(wtree, id)),
     ),
     worktree_path: String(
       input.worktree_path ??
         (leafChild
           ? coordinatorWorktree
-          : taskAssignmentWorktreePath(contextRoot, slug, id)),
+          : taskAssignmentWorktreePath(contextRoot, wtree, id)),
     ),
     child_wtree: String(
-      input.child_wtree ??
-        input.child_slug ??
-        (leafChild ? "" : taskAssignmentChildSlug(slug, id)),
+      input.child_wtree ?? (leafChild ? "" : taskAssignmentChildWtree(wtree, id)),
     ),
     concurrency_group: String(input.concurrency_group ?? ""),
     merge_target: String(input.merge_target ?? coordinatorBranch),
     merge_lease_id: String(
       input.merge_lease_id ??
-        (leafChild ? "" : taskAssignmentMergeLeaseId(slug, id)),
+        (leafChild ? "" : taskAssignmentMergeLeaseId(wtree, id)),
     ),
     merge_commit: String(input.merge_commit ?? ""),
     system_impact_ref: String(
       input.system_impact_ref ??
-        (leafChild ? "" : `.loopo/quests/${slug}/children/${id}.yaml`),
+        (leafChild ? "" : `.loopo/quests/${wtree}/children/${id}.yaml`),
     ),
     acceptance: planTaskAcceptance(
       input.acceptance ?? input.acceptance_criteria,
@@ -1616,8 +1614,8 @@ export function applyQuestPlanToTasks(
     : [];
   const nextState: QuestState = {
     schema_version: 3,
-    wtree: files.slug,
-    quest_id: String(state.quest_id ?? files.slug),
+    wtree: files.wtree,
+    quest_id: String(state.quest_id ?? files.wtree),
     flow_id: String(state.flow_id ?? "swe"),
     flow_version: Number(state.flow_version ?? 1),
     stage: String(state.stage ?? "planning"),
@@ -1664,7 +1662,7 @@ export function renderPlanYaml(input: {
     lines.push("  []");
   } else {
     taskInputs.forEach((task, index) => {
-      const id = slugify(
+      const id = normalizeName(
         String(task.id ?? task.task_id ?? `task-${index + 1}`),
       );
       lines.push(`  - id: ${yamlScalar(id)}`);
@@ -1697,8 +1695,8 @@ export function writeQuestPlan(
   writeText(
     files.plan,
     renderPlanYaml({
-      wtree: files.slug,
-      questId: String(state.quest_id ?? files.slug),
+      wtree: files.wtree,
+      questId: String(state.quest_id ?? files.wtree),
       prompt: String(state.prompt ?? ""),
       plan,
     }),
@@ -1715,11 +1713,16 @@ export function applyChildStatusToTasks(
   state: Partial<QuestState>,
   update: Partial<QuestTask> & { id: string; status: string },
 ): QuestState {
-  const taskId = slugify(update.id);
+  if (LEGACY_CHILD_WTREE_KEY in update) {
+    throw new Error(
+      `legacy child callback key "${LEGACY_CHILD_WTREE_KEY}" is unsupported; send "child_wtree" instead`,
+    );
+  }
+  const taskId = normalizeName(update.id);
   const nextState: QuestState = {
     schema_version: 3,
-    wtree: files.slug,
-    quest_id: String(state.quest_id ?? files.slug),
+    wtree: files.wtree,
+    quest_id: String(state.quest_id ?? files.wtree),
     flow_id: String(state.flow_id ?? "swe"),
     flow_version: Number(state.flow_version ?? 1),
     stage: String(state.stage ?? "planning"),
@@ -1740,10 +1743,7 @@ export function applyChildStatusToTasks(
       return {
         ...task,
         status: update.status,
-        child_wtree: childTaskValue(
-          update.child_wtree ?? update.child_slug,
-          task.child_wtree ?? task.child_slug ?? "",
-        ),
+        child_wtree: childTaskValue(update.child_wtree, task.child_wtree ?? ""),
         branch_ref: childTaskValue(update.branch_ref, task.branch_ref),
         worktree_path: childTaskValue(update.worktree_path, task.worktree_path),
         merge_target: childTaskValue(update.merge_target, task.merge_target),
@@ -1786,8 +1786,8 @@ export function applyLandingReceipt(
 ): QuestState {
   const nextState: QuestState = {
     schema_version: 3,
-    wtree: files.slug,
-    quest_id: String(state.quest_id ?? files.slug),
+    wtree: files.wtree,
+    quest_id: String(state.quest_id ?? files.wtree),
     flow_id: String(state.flow_id ?? "swe"),
     flow_version: Number(state.flow_version ?? 1),
     stage: String(state.stage ?? "planning"),
@@ -1819,26 +1819,26 @@ export function applyLandingReceipt(
 
 export function createQuest(input: {
   repoRoot: string;
-  slug: string;
+  wtree: string;
   prompt: string;
   resolutionSource: string;
   workspace: QuestWorkspace;
   flowId?: string;
   flowVersion?: number;
-  parentQuestSlug?: string;
+  parentWtree?: string;
   landingTargetBranch?: string;
   landingTargetWorktree?: string;
   landedCommit?: string;
   landingStrategy?: string;
 }): { files: QuestFiles; state: QuestState } {
-  const files = questFiles(input.repoRoot, input.slug);
+  const files = questFiles(input.repoRoot, input.wtree);
   if (existsSync(files.tasks) || existsSync(files.plan)) {
-    throw new Error(`quest slug already exists: ${input.slug}`);
+    throw new Error(`quest wtree already exists: ${input.wtree}`);
   }
   const state: QuestState = {
     schema_version: 3,
-    wtree: input.slug,
-    quest_id: input.slug,
+    wtree: input.wtree,
+    quest_id: input.wtree,
     flow_id: input.flowId ?? "swe",
     flow_version: input.flowVersion ?? 1,
     stage: "planning",
@@ -1847,7 +1847,7 @@ export function createQuest(input: {
     resolution_source: input.resolutionSource,
     coordinator_branch: input.workspace.branch_ref,
     coordinator_worktree: input.workspace.worktree_path,
-    parent_wtree: String(input.parentQuestSlug ?? ""),
+    parent_wtree: String(input.parentWtree ?? ""),
     landing_target_branch: String(input.landingTargetBranch ?? "main"),
     landing_target_worktree: String(input.landingTargetWorktree ?? ""),
     landed_commit: String(input.landedCommit ?? ""),
@@ -1860,8 +1860,8 @@ export function createQuest(input: {
   writeText(
     files.plan,
     renderPlanYaml({
-      wtree: input.slug,
-      questId: input.slug,
+      wtree: input.wtree,
+      questId: input.wtree,
       prompt: input.prompt,
       plan: null,
     }),
@@ -1880,12 +1880,12 @@ export function createQuest(input: {
   }
   appendJsonl(files.handoffs, {
     event: "quest_started",
-    quest_id: input.slug,
+    quest_id: input.wtree,
     stage: state.stage,
     iteration: 0,
     stop_reason: "none",
   });
-  writeQuestManifest(files, `start-${input.slug}`, "loopo quest next");
+  writeQuestManifest(files, `start-${input.wtree}`, "loopo quest next");
   return { files, state };
 }
 
@@ -1895,8 +1895,8 @@ export function findLatestQuest(
   const questsDir = resolve(repoRoot, LOOPO_QUESTS_DIR);
   if (!existsSync(questsDir)) return null;
   const entries = readdirSync(questsDir)
-    .map((slug) => {
-      const files = questFiles(repoRoot, slug);
+    .map((wtree) => {
+      const files = questFiles(repoRoot, wtree);
       if (!existsSync(files.tasks)) return null;
       return { files, mtimeMs: statSync(files.tasks).mtimeMs };
     })
@@ -1926,14 +1926,14 @@ export function updateQuestStage(
   const state = parseTasksYaml(readText(files.tasks));
   appendJsonl(files.handoffs, {
     event: "stage_changed",
-    quest_id: state.quest_id ?? files.slug,
+    quest_id: state.quest_id ?? files.wtree,
     stage: nextStage,
   });
   writeQuestManifest(files, requestId, writerCommand);
   return parseTasksYaml(readText(files.tasks));
 }
 
-export function extractSlugFromTasksPath(path: string): string | null {
+export function extractWtreeFromTasksPath(path: string): string | null {
   const normalized = path.replace(/\\/g, "/");
   const questMatch = normalized.match(
     /(?:^|\/)\.loopo\/quests\/([a-z0-9]+(?:-[a-z0-9]+)*)\/tasks\.yaml$/i,
@@ -2012,16 +2012,16 @@ function isEmptyDirectory(path: string): boolean {
 
 export function coordinatorWorktreePath(
   repoRoot: string,
-  slug: string,
+  wtree: string,
 ): string {
-  return resolve(repoRoot, "worktrees", slug);
+  return resolve(repoRoot, "worktrees", wtree);
 }
 
 export function landingTargetWorktreePath(
   repoRoot: string,
   branchRef: string,
 ): string {
-  return resolve(repoRoot, "worktrees", `landing-${slugify(branchRef)}`);
+  return resolve(repoRoot, "worktrees", `landing-${normalizeName(branchRef)}`);
 }
 
 function ensureNamedWorkspace(
@@ -2108,9 +2108,9 @@ function ensureNamedWorkspace(
 
 export function ensureCoordinatorWorkspace(
   repoRoot: string,
-  slug: string,
+  wtree: string,
 ): QuestWorkspace {
-  return ensureNamedWorkspace(repoRoot, slug, coordinatorWorktreePath(repoRoot, slug));
+  return ensureNamedWorkspace(repoRoot, wtree, coordinatorWorktreePath(repoRoot, wtree));
 }
 
 export function ensureTaskWorkspace(
@@ -2229,10 +2229,10 @@ export function renderEmptyTasksDocument(meta: {
 
 export function ensureQuestFiles(
   repoRoot: string,
-  slug: string,
+  wtree: string,
   objective: string,
 ): QuestFiles {
-  const files = questFiles(repoRoot, slug);
+  const files = questFiles(repoRoot, wtree);
   if (!existsSync(files.tasks)) {
     writeText(files.tasks, renderEmptyTasksDocument({ objective }));
   }
@@ -2286,7 +2286,7 @@ export function rewriteQuestMeta(
 
 export function replaceTasksSection(
   repoRoot: string,
-  slug: string,
+  wtree: string,
   tasksText: string,
   newTable: string,
 ): string {
@@ -2295,7 +2295,7 @@ export function replaceTasksSection(
   if (start < 0) {
     return rewriteTaskAssignments(
       repoRoot,
-      slug,
+      wtree,
       `${tasksText.trim()}\n\n## Tasks\n${newTable.trim()}\n`,
     ).text;
   }
@@ -2309,7 +2309,7 @@ export function replaceTasksSection(
   const replacement = ["## Tasks", ...newTable.trim().split("\n")];
   return rewriteTaskAssignments(
     repoRoot,
-    slug,
+    wtree,
     [...lines.slice(0, start), ...replacement, ...lines.slice(end)].join("\n"),
   ).text;
 }

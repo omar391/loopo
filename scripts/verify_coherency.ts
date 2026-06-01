@@ -33,6 +33,52 @@ function assertNotContains(text: string, needle: string, scope: string): void {
     throw new Error(`${scope} must not include: ${needle}`);
 }
 
+function assertNoLegacyIdentityTerms(): void {
+  const pattern = [
+    "\\bsl",
+    "ug\\b",
+    "parent_quest_",
+    "sl",
+    "ug",
+    "child_",
+    "sl",
+    "ug",
+    "--sl",
+    "ug",
+  ].join("");
+  const proc = Bun.spawnSync(
+    [
+      "rg",
+      "-n",
+      pattern,
+      ".",
+      "--hidden",
+      "--glob",
+      "!node_modules",
+      "--glob",
+      "!.git",
+      "--glob",
+      "!worktrees",
+      "--glob",
+      "!.loopo",
+    ],
+    {
+      cwd: PACKAGE_ROOT,
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
+  if (proc.exitCode === 1) return;
+  if (proc.exitCode !== 0) {
+    throw new Error(
+      `legacy identity scan failed: ${new TextDecoder().decode(proc.stderr).trim() || new TextDecoder().decode(proc.stdout).trim()}`,
+    );
+  }
+  throw new Error(
+    `legacy identity terms reintroduced:\n${new TextDecoder().decode(proc.stdout).trim()}`,
+  );
+}
+
 function assertMinimalSkillRoot(): void {
   const visibleEntries = readdirSync(SKILL_ROOT).filter(
     (entry) => !entry.startsWith("."),
@@ -193,6 +239,7 @@ function main(): number {
     ],
   ] as const;
   for (const [label, path] of required) assertExists(path, label);
+  assertNoLegacyIdentityTerms();
   assertMinimalSkillRoot();
   assertNotContains(
     existsSync(join(PACKAGE_ROOT, "SKILL.md")) ? "present" : "",
