@@ -1135,7 +1135,7 @@ export function applySystemUpdate(
     touched.push(fullPath);
   }
 
-  touched.push(writeSystemManifest(repoRoot, requestId, "loopship resume"));
+  touched.push(writeSystemManifest(repoRoot, requestId, "loopship fastflow"));
   return touched;
 }
 
@@ -1340,12 +1340,12 @@ export function renderTasksYaml(state: QuestState): string {
       schema_version: 4,
       wtree,
       quest_id: String(state.quest_id ?? wtree),
-      flow_id: String(state.flow_id ?? "swe"),
+      flow_id: String(state.flow_id ?? ""),
       flow_version:
         Number.isInteger(state.flow_version) && state.flow_version > 0
           ? state.flow_version
           : 1,
-      stage: String(state.stage ?? "planning"),
+      stage: String(state.stage ?? ""),
       prompt: String(state.prompt ?? ""),
       context_root: String(state.context_root ?? ""),
       resolution_source: String(state.resolution_source ?? ""),
@@ -1439,11 +1439,11 @@ export function parseTasksYaml(text: string): Partial<QuestState> {
     schema_version: 4,
     wtree: String(raw.wtree ?? "").trim(),
     quest_id: String(raw.quest_id ?? raw.wtree ?? "").trim(),
-    flow_id: String(raw.flow_id ?? "swe").trim() || "swe",
+    flow_id: String(raw.flow_id ?? "").trim(),
     flow_version: Number.isInteger(raw.flow_version)
       ? Number(raw.flow_version)
       : Math.max(1, Number(raw.flow_version ?? 1) || 1),
-    stage: String(raw.stage ?? "planning").trim() || "planning",
+    stage: String(raw.stage ?? "").trim(),
     prompt: String(raw.prompt ?? ""),
     context_root: String(raw.context_root ?? ""),
     resolution_source: String(raw.resolution_source ?? ""),
@@ -1555,7 +1555,7 @@ function questManifestPathKey(files: QuestFiles, path: string): string {
 export function writeQuestManifest(
   files: QuestFiles,
   requestId = "quest",
-  writerCommand = "loopship resume",
+  writerCommand = "loopship fastflow",
 ): void {
   const previous = parseYamlFile(files.manifest);
   const previousHead =
@@ -1706,9 +1706,9 @@ export function applyQuestPlanToTasks(
     schema_version: 4,
     wtree: files.wtree,
     quest_id: String(state.quest_id ?? files.wtree),
-    flow_id: String(state.flow_id ?? "swe"),
+    flow_id: String(state.flow_id ?? ""),
     flow_version: Number(state.flow_version ?? 1),
-    stage: String(state.stage ?? "planning"),
+    stage: String(state.stage ?? ""),
     prompt: String(state.prompt ?? ""),
     context_root: String(state.context_root ?? ""),
     resolution_source: String(state.resolution_source ?? ""),
@@ -1771,9 +1771,9 @@ export function applyChildStatusToTasks(
     schema_version: 4,
     wtree: files.wtree,
     quest_id: String(state.quest_id ?? files.wtree),
-    flow_id: String(state.flow_id ?? "swe"),
+    flow_id: String(state.flow_id ?? ""),
     flow_version: Number(state.flow_version ?? 1),
-    stage: String(state.stage ?? "planning"),
+    stage: String(state.stage ?? ""),
     prompt: String(state.prompt ?? ""),
     context_root: String(state.context_root ?? ""),
     resolution_source: String(state.resolution_source ?? ""),
@@ -1846,9 +1846,9 @@ export function applyLandingReceipt(
     schema_version: 4,
     wtree: files.wtree,
     quest_id: String(state.quest_id ?? files.wtree),
-    flow_id: String(state.flow_id ?? "swe"),
+    flow_id: String(state.flow_id ?? ""),
     flow_version: Number(state.flow_version ?? 1),
-    stage: String(state.stage ?? "planning"),
+    stage: String(state.stage ?? ""),
     prompt: String(state.prompt ?? ""),
     context_root: String(state.context_root ?? ""),
     resolution_source: String(state.resolution_source ?? ""),
@@ -1891,8 +1891,9 @@ export function createQuest(input: {
   prompt: string;
   resolutionSource: string;
   workspace: QuestWorkspace;
-  flowId?: string;
+  flowId: string;
   flowVersion?: number;
+  initialStage: string;
   parentWtree?: string;
   parentTaskId?: string;
   parentContextRef?: string;
@@ -1909,9 +1910,9 @@ export function createQuest(input: {
     schema_version: 4,
     wtree: input.wtree,
     quest_id: input.wtree,
-    flow_id: input.flowId ?? "swe",
+    flow_id: input.flowId,
     flow_version: input.flowVersion ?? 1,
-    stage: "planning",
+    stage: input.initialStage,
     prompt: input.prompt,
     context_root: input.repoRoot,
     resolution_source: input.resolutionSource,
@@ -1940,7 +1941,7 @@ export function createQuest(input: {
     quest_id: input.wtree,
     stage: state.stage,
   });
-  writeQuestManifest(files, `start-${input.wtree}`, "loopship resume");
+  writeQuestManifest(files, `start-${input.wtree}`, "loopship fastflow");
   return { files, state };
 }
 
@@ -1948,7 +1949,7 @@ export function updateQuestStage(
   files: QuestFiles,
   nextStage: string,
   requestId = "quest-stage",
-  writerCommand = "loopship resume",
+  writerCommand = "loopship fastflow",
 ): Partial<QuestState> {
   const current = parseTasksYaml(readText(files.tasks));
   const state = {
@@ -2289,6 +2290,8 @@ export function ensureQuestFiles(
   repoRoot: string,
   wtree: string,
   objective: string,
+  flowId = "",
+  initialStage = "",
 ): QuestFiles {
   const files = questFiles(repoRoot, wtree);
   if (!existsSync(files.tasks)) {
@@ -2296,9 +2299,9 @@ export function ensureQuestFiles(
       schema_version: 4,
       wtree,
       quest_id: wtree,
-      flow_id: "swe",
+      flow_id: flowId,
       flow_version: 1,
-      stage: "planning",
+      stage: initialStage,
       prompt: objective,
       context_root: repoRoot,
       resolution_source: "manual",
